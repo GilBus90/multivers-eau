@@ -6,7 +6,7 @@ const BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/dat
 async function getIdToken() {
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
-  return await user.getIdToken();
+  return await user.getIdToken(true);
 }
 
 function toFirestoreValue(value) {
