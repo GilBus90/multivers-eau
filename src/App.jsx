@@ -260,7 +260,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         const d = defaultData();
         setData(d);
         try {
-          await saveData(uid, d);
+          await saveData(currentUid, d);
         } catch (_) {}
       }
     })();
@@ -276,7 +276,7 @@ export default function App({ uid: currentUid, onSignOut }) {
   const saveWithRetry = useCallback(async (payload, attempts = 3) => {
     for (let i = 0; i < attempts; i++) {
       try {
-        await saveData(uid, payload);
+        await saveData(currentUid, payload);
         return true;
       } catch (e) {
         if (i < attempts - 1) await sleep(500 * (i + 1) * (i + 1));
