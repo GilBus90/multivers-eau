@@ -237,7 +237,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 
 /* ---------------------------------------------------------------------- */
 
-export default function App({ uid, onSignOut }) {
+export default function App({ uid: currentUid, onSignOut }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("dashboard");
   const [saving, setSaving] = useState(false);
@@ -248,13 +248,13 @@ export default function App({ uid, onSignOut }) {
   useEffect(() => {
     (async () => {
       try {
-        const remote = await loadData(uid);
+        const remote = await loadData(currentUid);
         if (remote) {
           setData(migrate(remote));
         } else {
           const d = defaultData();
           setData(d);
-          await saveData(uid, d);
+          await saveData(currentUid, d);
         }
       } catch (e) {
         const d = defaultData();
@@ -264,7 +264,7 @@ export default function App({ uid, onSignOut }) {
         } catch (_) {}
       }
     })();
-  }, [uid]);
+  }, [currentUid]);
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -283,7 +283,7 @@ export default function App({ uid, onSignOut }) {
       }
     }
     return false;
-  }, [uid]);
+  }, [currentUid]);
 
   const persist = useCallback(
     async (next) => {
