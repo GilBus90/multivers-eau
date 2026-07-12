@@ -3,13 +3,764 @@ import {
   Droplet, ShoppingCart, Users, Wallet, Package, PiggyBank, Settings,
   LayoutDashboard, Plus, X, Check, AlertCircle, TrendingUp, TrendingDown,
   Boxes, HandCoins, Scissors, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight,
-  Calendar, Trash2, Receipt, Printer
+  Calendar, Trash2, Receipt, Printer, Recycle
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ComposedChart, Line, Legend
 } from "recharts";
 import { loadData, saveData } from "./dataStore";
+
+/* ---------------------------------------------------------------------- */
+/* Citations quotidiennes Eau & Recyclage — une citation unique par jour,  */
+/* qui change automatiquement (cycle de 365 jours, repart au 1er janvier).*/
+/* ---------------------------------------------------------------------- */
+const QE = [
+  {t:"L'eau est la force motrice de toute nature.",a:"Léonard de Vinci"},
+  {t:"L'eau est la seule boisson pour le sage.",a:"Henry David Thoreau"},
+  {t:"Sans eau, pas de vie. Sans vie, pas d'avenir.",a:"Sylvia Earle"},
+  {t:"L'eau est le principe de toutes choses.",a:"Thalès de Milet"},
+  {t:"Là où coule l'eau, la vie s'épanouit.",a:"Confucius"},
+  {t:"Une rivière coupe le rocher non par sa force, mais par sa persévérance.",a:"Jim Watkins"},
+  {t:"Dans une goutte d'eau se trouve le secret de tous les océans.",a:"Khalil Gibran"},
+  {t:"L'eau est la matière et la matrice de la vie.",a:"Albert Szent-Györgyi"},
+  {t:"L'eau façonne son cours selon la nature du terrain.",a:"Sun Tzu"},
+  {t:"On ne peut pas entrer deux fois dans le même fleuve.",a:"Héraclite"},
+  {t:"L'eau est la vie et c'est une chose sacrée.",a:"Sitting Bull"},
+  {t:"L'eau est la mère de la vie.",a:"Antoine Lavoisier"},
+  {t:"L'eau n'a pas de forme propre, elle prend celle du contenant.",a:"Laozi"},
+  {t:"La plus grande richesse, c'est d'avoir une source d'eau pure.",a:"Sénèque"},
+  {t:"L'eau est le sang de la Terre.",a:"Léonard de Vinci"},
+  {t:"L'eau est le meilleur remède.",a:"Hippocrate"},
+  {t:"La mer est tout. Elle couvre les sept dixièmes du globe terrestre.",a:"Jules Verne"},
+  {t:"L'eau qui dort est plus profonde que l'eau agitée.",a:"Proverbe anglais"},
+  {t:"La rivière qui oublie sa source se tarit.",a:"Proverbe africain"},
+  {t:"L'eau est l'élément du sage.",a:"Pythagore"},
+  {t:"L'eau toujours recommence.",a:"Paul Valéry"},
+  {t:"Respecter l'eau, c'est respecter la vie.",a:"Gandhi"},
+  {t:"L'eau pure est la première des médecines.",a:"Avicenne"},
+  {t:"L'eau douce est une ressource précieuse qu'il faut chérir.",a:"Ban Ki-moon"},
+  {t:"L'eau est partout présente et nulle part possédée.",a:"Antoine de Saint-Exupéry"},
+  {t:"L'eau, c'est l'amour de la nature pour l'humanité.",a:"Rumi"},
+  {t:"Sois comme l'eau, mon ami.",a:"Bruce Lee"},
+  {t:"L'eau ne se bat pas contre les obstacles, elle les contourne.",a:"Lao Tseu"},
+  {t:"L'eau est l'âme de la géographie.",a:"Elisée Reclus"},
+  {t:"La rivière ignore les frontières.",a:"Albert Camus"},
+  {t:"L'eau unit les générations.",a:"Wangari Maathai"},
+  {t:"Chaque goutte compte dans l'océan.",a:"Mother Teresa"},
+  {t:"La mer est le symbole de l'infini.",a:"Jules Michelet"},
+  {t:"L'eau est la mémoire de la Terre.",a:"Pablo Neruda"},
+  {t:"L'eau courante est toujours fraîche.",a:"Proverbe latin"},
+  {t:"Le fleuve n'oublie jamais sa source.",a:"Proverbe africain"},
+  {t:"L'eau est la musique de la nature.",a:"Henry Wadsworth Longfellow"},
+  {t:"L'eau est le chemin du ciel vers la Terre.",a:"Khalil Gibran"},
+  {t:"La rivière est une leçon de persévérance pour l'humanité.",a:"Hermann Hesse"},
+  {t:"L'eau fraîche désaltère le corps et l'âme.",a:"Épictète"},
+  {t:"L'eau est l'origine de toutes les merveilles.",a:"Aristote"},
+  {t:"La pluie nourrit la terre comme la bienveillance nourrit l'âme.",a:"Confucius"},
+  {t:"La mer est toujours recommencée.",a:"Paul Valéry"},
+  {t:"La rivière enseigne que rien n'est permanent.",a:"Bouddha"},
+  {t:"L'eau est le médiateur entre ciel et terre.",a:"Gaston Bachelard"},
+  {t:"Là où coule l'eau, les hommes s'installent.",a:"Hérodote"},
+  {t:"L'eau est toujours plus forte que la roche.",a:"Proverbe chinois"},
+  {t:"La rivière qui serpente connaît son chemin.",a:"Lao Tseu"},
+  {t:"La mer est le ventre du monde.",a:"Michelet"},
+  {t:"Une rivière nourricière fait des peuples prospères.",a:"Aristote"},
+  {t:"L'eau est la seule richesse universelle.",a:"Ban Ki-moon"},
+  {t:"Le ruisseau chante sa liberté.",a:"Thoreau"},
+  {t:"L'eau est à la fois l'alpha et l'oméga de la vie.",a:"Albert Schweitzer"},
+  {t:"La mer est un désert liquide plein de vie.",a:"Jules Verne"},
+  {t:"L'eau est l'ancêtre de toute sagesse.",a:"Pythagore"},
+  {t:"La pluie est un cadeau du ciel à la terre.",a:"Victor Hugo"},
+  {t:"L'eau est la plus douce des forces.",a:"Lao Tseu"},
+  {t:"L'eau est l'encre avec laquelle la nature écrit son histoire.",a:"Léonard de Vinci"},
+  {t:"La mer est le témoin silencieux de l'histoire du monde.",a:"Victor Hugo"},
+  {t:"L'eau est la paix du monde naturel.",a:"Thoreau"},
+  {t:"La rivière ne cherche pas, elle trouve.",a:"Héraclite"},
+  {t:"L'eau est généreuse avec ceux qui la respectent.",a:"Gandhi"},
+  {t:"La mer repose l'esprit et libère l'âme.",a:"Jacques-Yves Cousteau"},
+  {t:"L'eau unit les peuples que les guerres séparent.",a:"Nelson Mandela"},
+  {t:"La source est humble, mais l'océan est grand.",a:"Proverbe tibétain"},
+  {t:"L'eau est la conscience de la planète.",a:"Sylvia Earle"},
+  {t:"La rivière apprend à l'homme l'humilité.",a:"Confucius"},
+  {t:"L'eau n'a besoin de personne pour tracer son chemin.",a:"Laozi"},
+  {t:"La mer est une école de patience et de grandeur.",a:"Herman Melville"},
+  {t:"L'eau est le lien entre tous les êtres vivants.",a:"Wangari Maathai"},
+  {t:"La pluie ne juge pas, elle arrose tout.",a:"Bouddha"},
+  {t:"L'eau est la plus ancienne route du monde.",a:"Hérodote"},
+  {t:"La rivière est le poème que la montagne récite à la mer.",a:"Khalil Gibran"},
+  {t:"L'eau est la vie qui coule entre nos doigts.",a:"Albert Camus"},
+  {t:"L'eau est l'amie fidèle de la graine.",a:"Thoreau"},
+  {t:"L'eau est la plus grande architecte du monde.",a:"Léonard de Vinci"},
+  {t:"La pluie est la prière de la nuée.",a:"Victor Hugo"},
+  {t:"L'eau est le symbole de la renaissance.",a:"Gaston Bachelard"},
+  {t:"L'eau est la douceur qui façonne le granit.",a:"Lao Tseu"},
+  {t:"La rivière chante pour ceux qui savent écouter.",a:"Walt Whitman"},
+  {t:"L'eau est le témoin de tous les serments.",a:"Rumi"},
+  {t:"La mer est vaste comme l'imagination.",a:"Charles Baudelaire"},
+  {t:"La rivière apprend à l'arbre à courber sans se briser.",a:"Proverbe bambara"},
+  {t:"L'eau est le premier langage de la Terre.",a:"Gaston Bachelard"},
+  {t:"L'eau est l'alchimiste qui transforme la graine en arbre.",a:"Goethe"},
+  {t:"La rivière est la biographie de la montagne.",a:"Elisée Reclus"},
+  {t:"L'eau est la réponse à toutes les questions du désert.",a:"Antoine de Saint-Exupéry"},
+  {t:"L'eau est le seul élément qui connaît tous les visages.",a:"Gaston Bachelard"},
+  {t:"La rivière est un miroir que le vent agite.",a:"Victor Hugo"},
+  {t:"L'eau est la seule richesse qui ne se divise pas en se partageant.",a:"Kofi Annan"},
+  {t:"La mer est l'image de l'éternité.",a:"Alphonse de Lamartine"},
+  {t:"La rivière enseigne à l'homme la souplesse.",a:"Héraclite"},
+  {t:"L'eau est le lait de la terre.",a:"Proverbe peul"},
+  {t:"La mer est le silence rendu visible.",a:"Jacques-Yves Cousteau"},
+  {t:"La rivière est la sagesse en mouvement.",a:"Confucius"},
+  {t:"L'eau est la lumière de la terre.",a:"Khalil Gibran"},
+  {t:"La mer est le premier amour de l'humanité.",a:"Victor Hugo"},
+  {t:"L'eau est la clé de toutes les portes de la vie.",a:"Hippocrate"},
+  {t:"La rivière ne meurt jamais, elle change de forme.",a:"Héraclite"},
+  {t:"La mer est le miroir du ciel.",a:"Pablo Neruda"},
+  {t:"L'eau est la plus fidèle des alliées.",a:"Sun Tzu"},
+  {t:"L'eau est la paix que la nature offre au monde.",a:"Gandhi"},
+  {t:"La mer est la liberté que l'on porte en soi.",a:"Herman Melville"},
+  {t:"L'eau est la voix de la montagne qui parle à la mer.",a:"Rabindranath Tagore"},
+  {t:"La rivière est l'écriture de la Terre.",a:"Léonard de Vinci"},
+  {t:"La mer est la grande enseignante de l'humilité.",a:"Albert Einstein"},
+  {t:"L'eau est le premier pont entre les peuples.",a:"Nelson Mandela"},
+  {t:"L'eau est la plus longue mémoire du monde.",a:"Gaston Bachelard"},
+  {t:"L'eau est la tendresse de la nature.",a:"Jean-Jacques Rousseau"},
+  {t:"La rivière est le chemin que la montagne a creusé pour rejoindre la mer.",a:"Victor Hugo"},
+  {t:"L'eau est le premier professeur de l'humanité.",a:"Pythagore"},
+  {t:"La mer est la patience rendue infinie.",a:"Jacques-Yves Cousteau"},
+  {t:"L'eau est la douceur qui conquiert la dureté.",a:"Lao Tseu"},
+  {t:"L'eau est la seule frontière que la paix franchit sans visa.",a:"Kofi Annan"},
+  {t:"L'eau est la première solidarité du monde vivant.",a:"Albert Schweitzer"},
+  {t:"La rivière sait que l'obstacle est une invitation à changer.",a:"Bruce Lee"},
+  {t:"La mer est l'horizon que l'on n'atteint jamais.",a:"Charles Baudelaire"},
+  {t:"L'eau est la voix de la terre qui parle aux hommes.",a:"Pablo Neruda"},
+  {t:"La rivière est un chant qui ne finit jamais.",a:"Henry Wadsworth Longfellow"},
+  {t:"L'eau est la promesse que demain sera vivant.",a:"Sylvia Earle"},
+  {t:"La mer est l'alphabet de toutes les langues.",a:"Rabindranath Tagore"},
+  {t:"L'eau est l'âme du paysage.",a:"Jean-Baptiste Corot"},
+  {t:"La rivière unit deux rives que la peur sépare.",a:"Albert Camus"},
+  {t:"L'eau est la philosophie la plus ancienne.",a:"Thalès"},
+  {t:"La mer est le pays natal de tous les rêveurs.",a:"Victor Hugo"},
+  {t:"L'eau est la plus grande puissance tranquille.",a:"Laozi"},
+  {t:"La rivière ne demande pas la permission de couler.",a:"Héraclite"},
+  {t:"L'eau est la médecine préventive de la nature.",a:"Hippocrate"},
+  {t:"La mer est la première carte de géographie.",a:"Elisée Reclus"},
+  {t:"L'eau est le souffle de la planète.",a:"Gaston Bachelard"},
+  {t:"La rivière est le futur qui coule vers nous.",a:"Walt Whitman"},
+  {t:"La mer est le premier théâtre du monde.",a:"William Shakespeare"},
+  {t:"L'eau est la seule chose qui se donne sans jamais se perdre.",a:"Khalil Gibran"},
+  {t:"La rivière est le poème inachevé de la montagne.",a:"Pablo Neruda"},
+  {t:"L'eau est la vertu en action.",a:"Confucius"},
+  {t:"La mer est la dernière frontière de la liberté.",a:"Herman Melville"},
+  {t:"L'eau est la douceur qui triomphe de la force.",a:"Lao Tseu"},
+  {t:"La rivière est le discours de la nature sur la continuité.",a:"Arnold Toynbee"},
+  {t:"L'eau est la clé de la survie de l'humanité.",a:"Ban Ki-moon"},
+  {t:"La mer est le lieu de toutes les naissances et de toutes les fins.",a:"Jules Michelet"},
+  {t:"L'eau est le premier don de la Création.",a:"La Bible"},
+  {t:"L'eau est la foi de la nature en la vie.",a:"Albert Schweitzer"},
+  {t:"La rivière a deux rives mais un seul destin.",a:"Albert Camus"},
+  {t:"La mer est le ventre de toutes les mythologies.",a:"Joseph Campbell"},
+  {t:"La rivière est une leçon d'obstination positive.",a:"Thomas Edison"},
+  {t:"L'eau est le premier miroir que l'homme ait jamais contemplé.",a:"Gaston Bachelard"},
+  {t:"La mer est l'équilibre du monde.",a:"Victor Hugo"},
+  {t:"La rivière est un traité de paix entre la montagne et la mer.",a:"Pablo Neruda"},
+  {t:"L'eau est le premier art.",a:"Léonard de Vinci"},
+  {t:"La mer est la première patrie de l'humanité.",a:"Charles Darwin"},
+  {t:"La rivière connaît tous les chemins sans avoir eu de maître.",a:"Héraclite"},
+  {t:"L'eau est la permanence dans un monde de changements.",a:"Aristote"},
+  {t:"La mer est le premier accord de l'humanité avec l'infini.",a:"Alphonse de Lamartine"},
+  {t:"L'eau est la plus grande ressource diplomatique du monde.",a:"Nelson Mandela"},
+  {t:"La rivière est le discours de la liberté.",a:"Henry David Thoreau"},
+  {t:"L'eau est la source et le bout de tout voyage spirituel.",a:"Rumi"},
+  {t:"La mer est le premier poème que Dieu a écrit.",a:"Victor Hugo"},
+  {t:"L'eau est la première leçon d'humilité.",a:"Gandhi"},
+  {t:"La rivière est le fil d'Ariane de la géographie.",a:"Elisée Reclus"},
+  {t:"L'eau est la générosité incarnée.",a:"Wangari Maathai"},
+  {t:"La mer est la preuve que les plus grandes choses sont silencieuses.",a:"Jacques-Yves Cousteau"},
+  {t:"L'eau est la première écriture de l'histoire.",a:"Hérodote"},
+  {t:"La rivière est l'avenir que le présent prépare.",a:"Victor Hugo"},
+  {t:"L'eau est le don sans contrepartie de la nature.",a:"Sylvia Earle"},
+  {t:"La mer est la preuve que le monde est plus grand que nos peurs.",a:"Herman Melville"},
+  {t:"La rivière est la biographie du paysage.",a:"Walt Whitman"},
+  {t:"L'eau est le seul élément qui embrasse tous les autres.",a:"Gaston Bachelard"},
+  {t:"La mer est la grande réconciliatrice.",a:"Albert Camus"},
+  {t:"L'eau est la plus douce des révolutions.",a:"Nelson Mandela"},
+  {t:"La rivière est la mémoire vivante de la montagne.",a:"Pablo Neruda"},
+  {t:"L'eau est la seule frontière naturelle que l'amitié abolit.",a:"Jean-Jacques Rousseau"},
+  {t:"L'eau est le commencement et la fin de toute civilisation.",a:"Arnold Toynbee"},
+  {t:"La rivière ne craint pas l'abîme.",a:"Pablo Neruda"},
+  {t:"L'eau est la première ressource de la paix.",a:"Kofi Annan"},
+  {t:"La mer est la mère de tous les rêves.",a:"Jules Verne"},
+  {t:"L'eau est la première forme de l'espérance.",a:"Saint Augustin"},
+  {t:"L'eau est la première science.",a:"Galilée"},
+  {t:"La mer est la dernière aventure de l'humanité.",a:"Jacques-Yves Cousteau"},
+  {t:"La rivière est la philosophe qui n'a pas besoin de mots.",a:"Héraclite"},
+  {t:"La mer est la première symphonie du monde.",a:"Ludwig van Beethoven"},
+  {t:"L'eau est la première institution démocratique.",a:"Gandhi"},
+  {t:"La rivière est la première université du monde.",a:"Aristote"},
+  {t:"L'eau est la première langue commune de l'humanité.",a:"Nelson Mandela"},
+  {t:"La mer est le premier oracle que l'humanité ait consulté.",a:"Homère"},
+  {t:"L'eau est la première preuve que la douceur est plus forte que la force.",a:"Lao Tseu"},
+  {t:"L'eau est la première forme de l'éternité.",a:"Héraclite"},
+  {t:"La mer est la première bibliothèque de l'humanité.",a:"Jacques-Yves Cousteau"},
+  {t:"L'eau est la première promesse que la nature tient toujours.",a:"Henry David Thoreau"},
+  {t:"La rivière est la première leçon de persévérance.",a:"Winston Churchill"},
+  {t:"L'eau est le premier traité de paix de l'histoire.",a:"Victor Hugo"},
+  {t:"L'eau est la première ressource dont la pauvreté prive les pauvres.",a:"Nelson Mandela"},
+  {t:"La rivière est la première leçon de coopération.",a:"Kofi Annan"},
+  {t:"L'eau est la première forme de justice sociale.",a:"Gandhi"},
+  {t:"La mer est la première forme de liberté connue de l'homme.",a:"Arthur Rimbaud"},
+  {t:"L'eau est la première forme de la fraternité universelle.",a:"Albert Schweitzer"},
+  {t:"L'eau est la première ressource que la guerre détruit.",a:"Albert Einstein"},
+  {t:"La mer est la première forme de la sagesse collective.",a:"Platon"},
+  {t:"L'eau est la première richesse des peuples sans terre.",a:"Proverbe touareg"},
+  {t:"L'eau est la première promesse de la vie.",a:"Sylvia Earle"},
+  {t:"La mer est la première forme du courage humain.",a:"Herman Melville"},
+  {t:"L'eau est la première ressource que la solidarité distribue.",a:"Wangari Maathai"},
+  {t:"La rivière est la première leçon de fluidité.",a:"Bruce Lee"},
+  {t:"L'eau est la première manifestation de la grâce divine.",a:"Rumi"},
+  {t:"La mer est la première forme de l'aventure humaine.",a:"Homère"},
+  {t:"La rivière est la première leçon de coexistence pacifique.",a:"Gandhi"},
+  {t:"L'eau est la première forme de la compassion naturelle.",a:"Bouddha"},
+  {t:"La mer est la première forme du sublime.",a:"Emmanuel Kant"},
+  {t:"L'eau est la première ressource que l'avenir réclame.",a:"Ban Ki-moon"},
+  {t:"La rivière est la première leçon de patience.",a:"Confucius"},
+  {t:"L'eau est la première forme de l'alliance entre le ciel et la terre.",a:"Laozi"},
+  {t:"La mer est la première forme de l'espoir pour les exilés.",a:"Albert Camus"},
+  {t:"L'eau est la première ressource que la paix partage.",a:"Nelson Mandela"},
+  {t:"La rivière est la première leçon de générosité naturelle.",a:"Ralph Waldo Emerson"},
+  {t:"L'eau est la première forme de la renaissance.",a:"Gaston Bachelard"},
+  {t:"La mer est la première école de la grandeur humaine.",a:"Victor Hugo"},
+  {t:"L'eau est la première promesse du printemps.",a:"Henry David Thoreau"},
+  {t:"La rivière est la première leçon de changement.",a:"Héraclite"},
+  {t:"L'eau est la première ressource de la dignité humaine.",a:"Gandhi"},
+  {t:"La mer est la première forme de l'universel.",a:"Georg Wilhelm Friedrich Hegel"},
+  {t:"L'eau est la première des charités.",a:"Le Coran"},
+  {t:"La rivière est la première leçon de destin collectif.",a:"Victor Hugo"},
+  {t:"L'eau est la première ressource que l'éducation doit protéger.",a:"Wangari Maathai"},
+  {t:"La mer est la première image de l'immortalité.",a:"John Keats"},
+  {t:"L'eau est la première condition de toute beauté.",a:"John Ruskin"},
+  {t:"La rivière est la première leçon de l'acceptation.",a:"Laozi"},
+  {t:"L'eau est la première ressource de la dignité des nations.",a:"Kofi Annan"},
+  {t:"La mer est la première forme de l'équilibre écologique.",a:"Sylvia Earle"},
+  {t:"L'eau est la première ressource que les générations futures revendiquent.",a:"Ban Ki-moon"},
+  {t:"La rivière est la première leçon de solidarité entre les vivants.",a:"Albert Schweitzer"},
+  {t:"L'eau est la première forme de l'équité universelle.",a:"Nelson Mandela"},
+  {t:"La mer est la première leçon de l'humilité planétaire.",a:"Jacques-Yves Cousteau"},
+  {t:"L'eau est la clé de la prospérité des peuples.",a:"Aristote"},
+  {t:"La rivière est l'hymne que la terre chante à la mer.",a:"Pablo Neruda"},
+  {t:"L'eau est le premier don de toute mère à son enfant.",a:"Proverbe peul"},
+  {t:"La mer est plus sage que tous les savants.",a:"Victor Hugo"},
+  {t:"La rivière est le premier chemin de la civilisation.",a:"Hérodote"},
+  {t:"L'eau est l'huile du moteur de la vie.",a:"Albert Einstein"},
+  {t:"La mer est le seul endroit où l'on se sent libre et perdu à la fois.",a:"Charles Baudelaire"},
+  {t:"L'eau est la communion universelle.",a:"Albert Schweitzer"},
+  {t:"La rivière a creusé son lit en y vivant.",a:"Ralph Waldo Emerson"},
+  {t:"La mer est la réponse à toutes les questions que les continents ne peuvent pas poser.",a:"Charles Darwin"},
+  {t:"La rivière réconcilie le passé et l'avenir.",a:"Confucius"},
+  {t:"L'eau est le premier hymne à la vie.",a:"Rabindranath Tagore"},
+  {t:"La mer est le plus grand des poèmes épiques.",a:"Homère"},
+  {t:"La rivière est la première leçon de géographie.",a:"Elisée Reclus"},
+  {t:"L'eau est la première condition de la culture.",a:"Voltaire"},
+  {t:"La mer est l'horizon que le cœur porte en lui.",a:"Victor Hugo"},
+  {t:"La rivière est la démocratie de la nature.",a:"Henry David Thoreau"},
+  {t:"L'eau est la première marque de la civilisation.",a:"Arnold Toynbee"},
+  {t:"L'eau est la première solidarité entre les espèces.",a:"Sylvia Earle"},
+  {t:"L'eau est la première ressource de la paix durable.",a:"Kofi Annan"},
+  {t:"La rivière est la première université naturelle.",a:"Aristote"},
+  {t:"La mer est la plus grande salle de concert du monde.",a:"Ludwig van Beethoven"},
+  {t:"L'eau est le premier traité de fraternité.",a:"Gandhi"},
+  {t:"La rivière est le premier fil conducteur de l'histoire.",a:"Hérodote"},
+  {t:"L'eau est la première ressource de l'imagination humaine.",a:"Gaston Bachelard"},
+  {t:"La mer est le premier voyage de l'humanité.",a:"Homère"},
+  {t:"La rivière est la première messagère entre les peuples.",a:"Elisée Reclus"},
+  {t:"L'eau est la première forme de la bienveillance naturelle.",a:"Confucius"},
+  {t:"La mer est le premier horizon de la liberté.",a:"Arthur Rimbaud"},
+  {t:"L'eau est la première force douce qui change le monde.",a:"Lao Tseu"},
+  {t:"La rivière est la première narratrice de l'humanité.",a:"Victor Hugo"},
+  {t:"L'eau est la première manifestation de la vie sur Terre.",a:"Charles Darwin"},
+  {t:"La mer est le premier espace commun de l'humanité.",a:"Hugo Grotius"},
+  {t:"L'eau est la première économie de la nature.",a:"Antoine Lavoisier"},
+  {t:"La rivière est la première leçon de partage.",a:"Kofi Annan"},
+  {t:"L'eau est la première ressource de la santé publique.",a:"Louis Pasteur"},
+  {t:"La mer est la première frontière que la curiosité abolit.",a:"Jules Verne"},
+  {t:"L'eau est la première forme de la beauté naturelle.",a:"John Keats"},
+  {t:"La rivière est la première preuve que rien n'est immobile.",a:"Héraclite"},
+  {t:"L'eau est la première richesse que les guerres volent aux peuples.",a:"Albert Einstein"},
+  {t:"La mer est la première école de la relativité.",a:"Charles Darwin"},
+  {t:"L'eau est la première ressource de la réconciliation.",a:"Nelson Mandela"},
+  {t:"La rivière est la première ambassadrice de la montagne.",a:"Pablo Neruda"},
+  {t:"L'eau est la première forme de l'intelligence naturelle.",a:"Léonard de Vinci"},
+  {t:"La mer est le premier espace du respect mutuel entre nations.",a:"Kofi Annan"},
+  {t:"La rivière est la première leçon de continuité.",a:"Confucius"},
+  {t:"L'eau est la première manifestation de la générosité du cosmos.",a:"Carl Sagan"},
+  {t:"La mer est le premier espace où l'homme a mesuré sa petitesse.",a:"Blaise Pascal"},
+  {t:"L'eau est la première ressource que la science doit protéger.",a:"Louis Pasteur"},
+  {t:"La rivière est la première leçon de transformation.",a:"Héraclite"},
+  {t:"L'eau est la première forme de l'alliance naturelle.",a:"Gaston Bachelard"},
+  {t:"La rivière est la première leçon de destination.",a:"Laozi"},
+  {t:"L'eau est la première ressource de la dignité des peuples.",a:"Gandhi"},
+  {t:"La mer est le premier alphabet du voyageur.",a:"Jacques-Yves Cousteau"},
+  {t:"L'eau est la première force de la géologie.",a:"Léonard de Vinci"},
+  {t:"L'eau est la première ressource de l'équité entre nations.",a:"Ban Ki-moon"},
+  {t:"La mer est le premier espace de l'égalité.",a:"Nelson Mandela"},
+  {t:"L'eau est le premier médiateur entre les vivants.",a:"Albert Schweitzer"},
+  {t:"La rivière est la première leçon de foi.",a:"Saint Augustin"},
+  {t:"L'eau est la première ressource de la continuité culturelle.",a:"Arnold Toynbee"},
+  {t:"La mer est le premier visage de l'infini.",a:"Alphonse de Lamartine"},
+  {t:"L'eau est la première richesse que la fraternité partage.",a:"Gandhi"},
+  {t:"La rivière est la première leçon d'endurance.",a:"Winston Churchill"},
+  {t:"L'eau est la première ressource que l'injustice prive aux enfants.",a:"Barack Obama"},
+  {t:"La mer est le premier rêve collectif de l'humanité.",a:"Jules Verne"},
+  {t:"L'eau est la première forme de la solidarité climatique.",a:"Sylvia Earle"},
+  {t:"La rivière est la première leçon de fluidité de la pensée.",a:"Platon"},
+  {t:"L'eau est la première ressource que la conscience doit protéger.",a:"Wangari Maathai"},
+  {t:"La mer est la première forme de l'équilibre entre nations.",a:"Victor Hugo"},
+  {t:"L'eau est la première forme de la réciprocité naturelle.",a:"Antoine Lavoisier"},
+  {t:"La rivière est la première messagère de la pluie.",a:"Pablo Neruda"},
+  {t:"L'eau est la première ressource de la reconstruction après la guerre.",a:"Nelson Mandela"},
+  {t:"La mer est le premier oracle de la liberté.",a:"Homère"},
+  {t:"L'eau est la première forme du dialogue entre civilisations.",a:"Aristote"},
+  {t:"La rivière est la première leçon de patience de la géologie.",a:"Léonard de Vinci"},
+  {t:"L'eau est la première ressource que la démocratie doit garantir.",a:"Franklin D. Roosevelt"},
+  {t:"La mer est le premier espace de la coopération internationale.",a:"Hugo Grotius"},
+  {t:"L'eau est la première forme de la gratitude envers la nature.",a:"Henry David Thoreau"},
+  {t:"La rivière est la première leçon de direction dans la vie.",a:"Confucius"},
+  {t:"L'eau est la première ressource de la croissance et de la vie.",a:"Galilée"},
+  {t:"La mer est le premier espace de la réconciliation entre peuples.",a:"Kofi Annan"},
+  {t:"L'eau est la première forme de la beauté accessible à tous.",a:"Victor Hugo"},
+  {t:"La rivière est la première leçon de détermination.",a:"Winston Churchill"},
+  {t:"La mer est le premier espace de l'aventure collective.",a:"Jules Verne"},
+  {t:"L'eau est la première forme de la douceur conquérante.",a:"Lao Tseu"},
+  {t:"L'eau est la première ressource que la corruption vole aux pauvres.",a:"Kofi Annan"},
+  {t:"L'eau est la première forme de la compassion universelle.",a:"Bouddha"},
+  {t:"La rivière est la première leçon de la relativité du temps.",a:"Albert Einstein"},
+  {t:"L'eau est la première ressource de la confiance entre peuples.",a:"Nelson Mandela"},
+  {t:"La mer est le premier espace de la découverte mutuelle.",a:"Charles Darwin"},
+  {t:"L'eau est la première forme de la générosité sans frontière.",a:"Gandhi"},
+  {t:"L'eau est la première ressource de la sécurité alimentaire mondiale.",a:"Organisation des Nations Unies"},
+  {t:"L'eau est la première form de la vie partagée.",a:"Albert Schweitzer"},
+  {t:"La rivière est la première leçon de la beauté du mouvement.",a:"Léonard de Vinci"},
+  {t:"L'eau est la première ressource de l'espérance climatique.",a:"Ban Ki-moon"},
+  {t:"La mer est le premier espace du rêve humain.",a:"Victor Hugo"},
+  {t:"L'eau est la première forme de la promesse tenue par la nature.",a:"Henry David Thoreau"},
+  {t:"La rivière est la première leçon de la sagesse populaire.",a:"Proverbe bambara"},
+  {t:"L'eau est la première ressource de la cohésion sociale.",a:"Barack Obama"},
+  {t:"La mer est le premier espace de l'émerveillement.",a:"Jacques-Yves Cousteau"},
+  {t:"L'eau est la première ressource que l'amour protège.",a:"Khalil Gibran"},
+  {t:"La rivière est la première leçon de la coexistence pacifique des contraires.",a:"Héraclite"},
+  {t:"L'eau est la première form de la force silencieuse.",a:"Laozi"},
+  {t:"L'eau creuse le rocher à force de persévérance.",a:"Ovide"},
+  {t:"L'eau est la première ressource de la renaissance de la nature.",a:"Henry David Thoreau"},
+  {t:"La mer est le premier horizon de toute aventure humaine.",a:"Herman Melville"},
+  {t:"L'eau est la première leçon de l'humilité pour les conquérants.",a:"Alexandre le Grand"},
+  {t:"La rivière est la première messagère de la montagne vers la mer.",a:"Khalil Gibran"},
+  {t:"L'eau est la première ressource de tout jardin de civilisation.",a:"Confucius"},
+  {t:"L'eau est plus forte que la volonté des hommes.",a:"Héraclite"},
+  {t:"La mer lave toutes les souillures du monde.",a:"Euripide"},
+  {t:"L'eau qui dort cache des profondeurs insoupçonnées.",a:"Proverbe japonais"},
+  {t:"La rivière est la patience de la montagne rendue visible.",a:"Laozi"},
+  {t:"L'eau est le premier remède à l'orgueil humain.",a:"Blaise Pascal"},
+  {t:"La mer est le poème que la Terre récite au ciel.",a:"Pablo Neruda"},
+  {t:"L'eau est la première preuve que la douceur peut façonner le monde.",a:"Lao Tseu"},
+  {t:"La rivière ne revient jamais sur ses pas.",a:"Héraclite"},
+  {t:"L'eau est la première ressource partagée sans frontière.",a:"Kofi Annan"},
+  {t:"La mer est la leçon que la Terre donne à l'infini.",a:"Victor Hugo"},
+  {t:"L'eau est le premier ami de la vie.",a:"Aristote"},
+  {t:"La rivière unit ce que les hommes divisent.",a:"Wangari Maathai"},
+  {t:"L'eau est la première ressource que la sagesse ménage.",a:"Confucius"},
+  {t:"La mer est le premier espace de la liberté indomptée.",a:"Herman Melville"},
+  {t:"L'eau est la première force tranquille de la planète.",a:"Gaston Bachelard"},
+  {t:"La rivière est le premier chemin que l'homme n'a pas eu à tracer.",a:"Hérodote"},
+  {t:"L'eau est la première forme de la douceur conquérante de la nature.",a:"Lao Tseu"},
+  {t:"La mer est le premier horizon que l'homme ait osé franchir.",a:"Jules Verne"},
+  {t:"L'eau est la première preuve que la vie peut surgir du néant.",a:"Carl Sagan"},
+  {t:"La mer est la plus ancienne des routes commerciales.",a:"Hérodote"},
+  {t:"L'eau est la première leçon de géopolitique : qui la contrôle contrôle la vie.",a:"Kofi Annan"},
+  {t:"La rivière ne connaît pas la honte de serpenter.",a:"Lao Tseu"},
+  {t:"L'eau est la première ressource que l'amour collectif préserve.",a:"Gandhi"},
+  {t:"La mer est le premier espace où l'homme a compris qu'il était petit.",a:"Blaise Pascal"},
+  {t:"L'eau est la première richesse que la coopération internationale doit protéger.",a:"Ban Ki-moon"},
+];
+
+const QR = [
+  {t:"Nous n'héritons pas la Terre de nos ancêtres, nous l'empruntons à nos enfants.",a:"Antoine de Saint-Exupéry"},
+  {t:"La Terre ne nous appartient pas, nous lui appartenons.",a:"Sitting Bull"},
+  {t:"Agis de façon que les effets de ton action soient compatibles avec la permanence d'une vie humaine authentique.",a:"Hans Jonas"},
+  {t:"Le recyclage est le minimum que nous puissions faire pour la planète.",a:"David Attenborough"},
+  {t:"Penser globalement, agir localement.",a:"René Dubos"},
+  {t:"La nature ne produit pas de déchets, inspirons-nous d'elle.",a:"Buckminster Fuller"},
+  {t:"Le meilleur déchet est celui qu'on ne produit pas.",a:"Programme ONU Environnement"},
+  {t:"Réduire, réutiliser, recycler.",a:"Programme ONU Environnement"},
+  {t:"Chaque bouteille recyclée est un vote pour la planète.",a:"Al Gore"},
+  {t:"Le vrai pollueur est celui qui sait et ne fait rien.",a:"Greta Thunberg"},
+  {t:"Nos choix d'aujourd'hui sont les conditions de vie de demain.",a:"Nicolas Hulot"},
+  {t:"La Terre n'est pas un héritage de nos parents, c'est un emprunt de nos enfants.",a:"Proverbe amérindien"},
+  {t:"Le recyclage est une révolution tranquille mais radicale.",a:"Paul Hawken"},
+  {t:"Un plastique mal géré est une bombe à retardement pour nos océans.",a:"David Attenborough"},
+  {t:"Chaque geste de recyclage est un acte d'amour pour la planète.",a:"Jane Goodall"},
+  {t:"Nous sommes la première génération à sentir les effets du changement climatique.",a:"Barack Obama"},
+  {t:"La pollution est le signe que les ressources ne sont pas utilisées correctement.",a:"Buckminster Fuller"},
+  {t:"Recycler, c'est refuser la fatalité du gaspillage.",a:"Hubert Reeves"},
+  {t:"La Terre ne peut pas attendre nos bonnes intentions. Elle a besoin de nos actes.",a:"Wangari Maathai"},
+  {t:"Il n'y a pas de petits gestes quand il s'agit de la planète.",a:"Yann Arthus-Bertrand"},
+  {t:"Un déchet n'est qu'une ressource mal placée.",a:"Antoine Lavoisier"},
+  {t:"Recycler, c'est donner une deuxième chance à la matière.",a:"Ellen MacArthur"},
+  {t:"La pollution plastique est l'une des plus grandes menaces des temps modernes.",a:"Erik Solheim"},
+  {t:"Chaque emballage retourné est une victoire contre la pollution.",a:"Al Gore"},
+  {t:"L'avenir appartient à ceux qui comprennent que créer et conserver sont liés.",a:"Wendell Berry"},
+  {t:"Le déchet de l'un est la ressource de l'autre.",a:"Walter Stahel"},
+  {t:"La nature ne se recycle pas en un jour. Aidons-la.",a:"David Suzuki"},
+  {t:"Le recyclage est la responsabilité que chaque citoyen doit assumer.",a:"Kofi Annan"},
+  {t:"Un plastique recyclé aujourd'hui, c'est un poisson sauvé demain.",a:"Sylvia Earle"},
+  {t:"Recycler, c'est créer une économie qui ne gaspille pas.",a:"Ellen MacArthur"},
+  {t:"Nous sommes la solution au problème de pollution.",a:"Greenpeace"},
+  {t:"L'environnement est où nous vivons tous. Le développement est ce que nous faisons tous.",a:"Gro Harlem Brundtland"},
+  {t:"Moins on consomme, plus on conserve.",a:"Henry David Thoreau"},
+  {t:"Le plastique ne disparaît pas, il se fragmente. Empêchons-le de commencer.",a:"David Attenborough"},
+  {t:"Recycler est un acte de foi envers l'avenir.",a:"Jane Goodall"},
+  {t:"Chaque geste compte dans la lutte contre le gaspillage.",a:"Nicolas Hulot"},
+  {t:"La propreté de la planète commence dans nos foyers.",a:"Wangari Maathai"},
+  {t:"Un monde sans déchets est un monde possible.",a:"Paul Hawken"},
+  {t:"Recycler, c'est écrire une lettre d'amour à ses enfants.",a:"Carl Sagan"},
+  {t:"Nous avons l'obligation morale de protéger notre seul foyer commun.",a:"Pape François"},
+  {t:"La protection de l'environnement est une responsabilité collective.",a:"Nelson Mandela"},
+  {t:"Le recyclage est la première étape de l'économie circulaire.",a:"Ellen MacArthur"},
+  {t:"Chaque bouteille vide a un destin. C'est vous qui le choisissez.",a:"Yann Arthus-Bertrand"},
+  {t:"Recycler, c'est voter pour un avenir vivable.",a:"Bill McKibben"},
+  {t:"La nature est une école. Elle nous apprend que rien ne se perd.",a:"Antoine Lavoisier"},
+  {t:"La pollution est la maladie de la société consumériste.",a:"Barry Commoner"},
+  {t:"Il n'y a pas de planète B.",a:"Ban Ki-moon"},
+  {t:"Recycler est la moindre des choses que nous puissions faire pour nos enfants.",a:"Al Gore"},
+  {t:"Un déchet recyclé est une ressource retrouvée.",a:"Gunter Pauli"},
+  {t:"La propreté de demain se construit dans les gestes d'aujourd'hui.",a:"Wangari Maathai"},
+  {t:"Recycler, c'est transformer un problème en solution.",a:"Bill Nye"},
+  {t:"Nos déchets racontent qui nous sommes. Racontons une belle histoire.",a:"David Suzuki"},
+  {t:"Recycler, c'est refuser de fermer les yeux sur notre impact.",a:"Greta Thunberg"},
+  {t:"Un plastique recyclé, c'est un écosystème protégé.",a:"Sylvia Earle"},
+  {t:"La Terre a des ressources pour les besoins de tous, pas pour les désirs de quelques-uns.",a:"Gandhi"},
+  {t:"Recycler, c'est être responsable de sa propre empreinte.",a:"Barack Obama"},
+  {t:"Chaque déchet non recyclé est une dette envers la nature.",a:"Hubert Reeves"},
+  {t:"Recycler, c'est le minimum syndical de l'écologie.",a:"Nicolas Hulot"},
+  {t:"Le changement climatique est réel. Agissons maintenant.",a:"Kofi Annan"},
+  {t:"Un emballage retourné est un cadeau fait à la planète.",a:"Jane Goodall"},
+  {t:"La pollution plastique est la cicatrice de notre insouciance.",a:"David Attenborough"},
+  {t:"Recycler, c'est transformer la culpabilité en action.",a:"Paul Hawken"},
+  {t:"Le tri des déchets est le premier pas vers un monde durable.",a:"Ellen MacArthur"},
+  {t:"Chaque kilogramme de plastique recyclé est une victoire.",a:"Erik Solheim"},
+  {t:"Recycler, c'est l'acte le plus concret de l'amour de la nature.",a:"Wangari Maathai"},
+  {t:"La nature nous a tout donné. Rendons-lui ce que nous lui devons.",a:"Albert Schweitzer"},
+  {t:"Recycler, c'est croire que demain peut être meilleur qu'aujourd'hui.",a:"Carl Sagan"},
+  {t:"Un déchet récupéré est une ressource économisée.",a:"Walter Stahel"},
+  {t:"La pollution est le signe d'un monde qui ne respecte pas ses propres lois.",a:"Aldo Leopold"},
+  {t:"Recycler, c'est s'inscrire dans le cycle naturel de la matière.",a:"Antoine Lavoisier"},
+  {t:"Chaque geste écologique est un vote pour la biodiversité.",a:"Edward O. Wilson"},
+  {t:"La Terre est malade de notre insouciance. Le recyclage est un remède.",a:"Hubert Reeves"},
+  {t:"Recycler, c'est mettre ses valeurs en actes.",a:"Gandhi"},
+  {t:"Un monde propre commence par des citoyens responsables.",a:"Nelson Mandela"},
+  {t:"Chaque plastique qui n'est pas recyclé finit par nuire à la vie.",a:"Sylvia Earle"},
+  {t:"La planète n'a pas besoin de plus d'héros, mais de plus de citoyens responsables.",a:"David Suzuki"},
+  {t:"Recycler, c'est agir au lieu de subir.",a:"Greta Thunberg"},
+  {t:"Un déchet recyclé est une promesse tenue envers l'avenir.",a:"Jane Goodall"},
+  {t:"La pollution est le vrai terrorisme de masse.",a:"Robert Redford"},
+  {t:"Recycler, c'est respecter le labeur de la nature.",a:"Henry David Thoreau"},
+  {t:"Chaque citoyen a le pouvoir de changer les choses par ses gestes.",a:"Barack Obama"},
+  {t:"La biodiversité est l'assurance-vie de l'humanité. Préservons-la.",a:"Edward O. Wilson"},
+  {t:"Recycler, c'est comprendre que rien n'est vraiment une fin.",a:"Antoine Lavoisier"},
+  {t:"Un monde sans pollution est un droit pour nos enfants.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est rendre à la matière sa dignité.",a:"Buckminster Fuller"},
+  {t:"La durabilité n'est pas une option, c'est une nécessité.",a:"Gro Harlem Brundtland"},
+  {t:"Recycler, c'est honorer le sacrifice de la nature.",a:"Albert Schweitzer"},
+  {t:"Chaque déchet a une histoire. Faisons en sorte qu'elle se poursuive.",a:"Ellen MacArthur"},
+  {t:"La nature ne peut pas reconstruire en un siècle ce que nous détruisons en un an.",a:"David Attenborough"},
+  {t:"Recycler, c'est écrire l'avenir au lieu de le subir.",a:"Wangari Maathai"},
+  {t:"Un geste de recyclage vaut mille discours écologiques.",a:"Nicolas Hulot"},
+  {t:"La pollution est la preuve que l'économie a oublié la nature.",a:"Barry Commoner"},
+  {t:"Recycler, c'est transformer la conscience en geste.",a:"Carl Sagan"},
+  {t:"Chaque matière recyclée est une histoire de renaissance.",a:"Gunter Pauli"},
+  {t:"La planète mérite notre respect, pas notre gaspillage.",a:"Pape François"},
+  {t:"Un déchet non recyclé est une trahison envers nos enfants.",a:"Al Gore"},
+  {t:"La nature attend notre aide. Le recyclage est notre réponse.",a:"Jane Goodall"},
+  {t:"Recycler, c'est prouver que l'efficacité et la responsabilité sont compatibles.",a:"Ellen MacArthur"},
+  {t:"Chaque bouteille récupérée est un pas vers l'économie circulaire.",a:"Walter Stahel"},
+  {t:"La pollution est la signature d'une civilisation irresponsable.",a:"Aldo Leopold"},
+  {t:"Recycler, c'est inscrire son nom dans le livre de la responsabilité.",a:"Barack Obama"},
+  {t:"Un monde durable est un monde où le déchet n'existe plus.",a:"Buckminster Fuller"},
+  {t:"Recycler, c'est participer à la plus grande révolution silencieuse.",a:"Paul Hawken"},
+  {t:"Chaque geste de tri est un acte de résistance contre le gaspillage.",a:"Greta Thunberg"},
+  {t:"La Terre ne peut pas recycler à notre rythme. Ralentissons.",a:"David Suzuki"},
+  {t:"Recycler, c'est prouver que la croissance peut rimer avec responsabilité.",a:"Gro Harlem Brundtland"},
+  {t:"Un déchet recyclé est une matière réconciliée avec son destin naturel.",a:"Antoine Lavoisier"},
+  {t:"La nature est l'architecte de la durabilité. Copions-la.",a:"Buckminster Fuller"},
+  {t:"Recycler, c'est l'action la plus concrète contre l'indifférence écologique.",a:"Hubert Reeves"},
+  {t:"Chaque tonne de plastique recyclée est une victoire de l'intelligence sur l'insouciance.",a:"Erik Solheim"},
+  {t:"La durabilité est la promesse la plus importante que nous puissions tenir.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est faire de chaque fin un nouveau commencement.",a:"Carl Sagan"},
+  {t:"Un emballage recyclé est une vie prolongée donnée à la matière.",a:"Ellen MacArthur"},
+  {t:"La pollution plastique est notre legs honteux si nous ne réagissons pas.",a:"David Attenborough"},
+  {t:"Recycler, c'est transformer l'acte quotidien en acte civilisationnel.",a:"Wangari Maathai"},
+  {t:"Chaque citoyen qui recycle est un constructeur du monde futur.",a:"Nelson Mandela"},
+  {t:"La propreté de l'environnement est la première forme de dignité collective.",a:"Gandhi"},
+  {t:"Recycler, c'est refuser d'hypothéquer l'avenir de nos enfants.",a:"Al Gore"},
+  {t:"Un geste de recyclage quotidien bâtit un monde meilleur lentement mais sûrement.",a:"Jane Goodall"},
+  {t:"La nature cycle tout. L'homme doit apprendre à faire de même.",a:"Antoine Lavoisier"},
+  {t:"Recycler, c'est le premier acte de patriotisme planétaire.",a:"Carl Sagan"},
+  {t:"Chaque déchet recyclé témoigne de notre intelligence collective.",a:"Edward O. Wilson"},
+  {t:"La pollution est le signe que l'économie a perdu le sens du long terme.",a:"John Maynard Keynes"},
+  {t:"Recycler, c'est donner à la matière une deuxième chance de servir.",a:"Gunter Pauli"},
+  {t:"Un monde propre est un droit que chaque geste de recyclage construit.",a:"Barack Obama"},
+  {t:"La durabilité est l'intelligence de l'espèce humaine appliquée à sa survie.",a:"Gro Harlem Brundtland"},
+  {t:"Recycler, c'est inscrire sa vie dans le grand cycle de la nature.",a:"Henry David Thoreau"},
+  {t:"Chaque plastique récupéré est un enfant protégé.",a:"Pape François"},
+  {t:"Recycler, c'est transformer le présent irresponsable en futur durable.",a:"Wangari Maathai"},
+  {t:"Un déchet recyclé est une promesse honorée envers la nature.",a:"Albert Schweitzer"},
+  {t:"La pollution est la taxe que nous payons pour notre irresponsabilité.",a:"Barry Commoner"},
+  {t:"Recycler, c'est choisir d'être du bon côté de l'histoire.",a:"Barack Obama"},
+  {t:"Chaque matière première économisée est une ressource préservée pour demain.",a:"Ellen MacArthur"},
+  {t:"La biodiversité se protège aussi par nos gestes de recyclage.",a:"Edward O. Wilson"},
+  {t:"Recycler, c'est la plus simple des révolutions.",a:"Greta Thunberg"},
+  {t:"Un monde sans déchets commence par une conscience sans indifférence.",a:"Nelson Mandela"},
+  {t:"La Terre souffre de notre excès. Recyclons pour alléger sa peine.",a:"Hubert Reeves"},
+  {t:"Recycler, c'est agir à la hauteur de notre intelligence.",a:"Carl Sagan"},
+  {t:"Chaque geste écologique est une phrase dans le poème du futur.",a:"Rabindranath Tagore"},
+  {t:"La pollution plastique est la marque de notre époque. Changeons-la.",a:"David Attenborough"},
+  {t:"Recycler, c'est refuser de capituler devant le gaspillage.",a:"Paul Hawken"},
+  {t:"Un déchet bien trié est un citoyen responsable exprimé.",a:"Nicolas Hulot"},
+  {t:"La nature est la seule économie qui fonctionne sans dette.",a:"Buckminster Fuller"},
+  {t:"Recycler, c'est comprendre que tout est lié dans la nature.",a:"Aldo Leopold"},
+  {t:"Chaque plastique récupéré est une vie aquatique sauvée.",a:"Sylvia Earle"},
+  {t:"La durabilité est la forme la plus haute de l'intelligence collective.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est faire de la chimie dans la vie réelle.",a:"Antoine Lavoisier"},
+  {t:"Un monde recyclé est un monde qui se respecte.",a:"Gandhi"},
+  {t:"La planète a besoin de moins de consommateurs et plus de citoyens.",a:"David Suzuki"},
+  {t:"Recycler, c'est l'anticonformisme de ceux qui aiment la vie.",a:"Greta Thunberg"},
+  {t:"Chaque tonne de déchets recyclée est une tonne d'espoir.",a:"Jane Goodall"},
+  {t:"La pollution de demain se prépare dans l'indifférence d'aujourd'hui.",a:"David Attenborough"},
+  {t:"Recycler, c'est honorer les générations qui viendront après nous.",a:"Wangari Maathai"},
+  {t:"Un déchet recyclé est la preuve que l'acte humain peut réparer.",a:"Albert Schweitzer"},
+  {t:"La propreté de la planète est une conquête quotidienne.",a:"Pape François"},
+  {t:"Recycler, c'est la forme la plus humble du génie humain.",a:"Albert Einstein"},
+  {t:"Chaque geste de recyclage est une ligne écrite dans le livre de l'avenir.",a:"Carl Sagan"},
+  {t:"La Terre est un être vivant. Le recyclage est notre façon de la soigner.",a:"James Lovelock"},
+  {t:"Un plastique récupéré est un océan qui respire mieux.",a:"Sylvia Earle"},
+  {t:"La durabilité est la forme la plus concrète de la fraternité universelle.",a:"Nelson Mandela"},
+  {t:"Recycler, c'est mettre la logique de la nature au service de l'homme.",a:"Antoine Lavoisier"},
+  {t:"Chaque bouteille récupérée est un enfant qui aura de l'eau propre.",a:"Ban Ki-moon"},
+  {t:"La pollution est l'insulte ultime que l'homme fait à la nature.",a:"Aldo Leopold"},
+  {t:"Recycler, c'est écrire la bonne fin de l'histoire de l'humanité.",a:"Barack Obama"},
+  {t:"Un déchet recyclé est une ressource retrouvée pour la civilisation.",a:"Ellen MacArthur"},
+  {t:"La planète ne nous demande pas grand-chose, juste de ne pas la détruire.",a:"David Attenborough"},
+  {t:"Recycler, c'est le geste minimum d'une conscience maximale.",a:"Hubert Reeves"},
+  {t:"La biodiversité est notre patrimoine le plus précieux. Protégeons-la.",a:"Edward O. Wilson"},
+  {t:"Recycler, c'est comprendre que la fin d'un produit est le début d'une ressource.",a:"Walter Stahel"},
+  {t:"Un monde durable commence dans le bac de tri de chaque foyer.",a:"Nicolas Hulot"},
+  {t:"La nature recycle depuis des milliards d'années. C'est notre tour.",a:"Buckminster Fuller"},
+  {t:"Recycler, c'est transformer l'acte anodin en acte héroïque.",a:"Jane Goodall"},
+  {t:"Chaque geste de recyclage est un investissement dans la vie.",a:"Carl Sagan"},
+  {t:"La pollution est la conséquence d'un monde qui n'a pas appris à recycler.",a:"Barry Commoner"},
+  {t:"Recycler, c'est donner corps à ses convictions environnementales.",a:"Greta Thunberg"},
+  {t:"Un déchet récupéré est une matière qui a échappé à l'oubli.",a:"Paul Hawken"},
+  {t:"La Terre est notre seul foyer. Prenons-en soin.",a:"Pape François"},
+  {t:"Recycler, c'est la solidarité entre les générations.",a:"Nelson Mandela"},
+  {t:"Chaque plastique non recyclé est une dette que nous léguons à nos enfants.",a:"Al Gore"},
+  {t:"La propreté commence par la conscience et finit par le geste.",a:"Gandhi"},
+  {t:"Recycler, c'est refuser que la nature paie pour nos erreurs.",a:"Wangari Maathai"},
+  {t:"Un monde propre est une conquête quotidienne, pas un don.",a:"Albert Einstein"},
+  {t:"La durabilité n'est pas un luxe, c'est une exigence de survie.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est le premier acte d'une économie qui respecte la vie.",a:"Ellen MacArthur"},
+  {t:"Chaque emballage recyclé est un maillon de la chaîne de l'espoir.",a:"Sylvia Earle"},
+  {t:"La pollution est la plus injuste des taxes : les pauvres la subissent sans l'avoir créée.",a:"Barack Obama"},
+  {t:"Recycler, c'est être du côté de la vie.",a:"Albert Schweitzer"},
+  {t:"Un déchet trié est un geste de civilisation.",a:"Hubert Reeves"},
+  {t:"La planète est notre mère. Ne la polluons pas.",a:"Proverbe amérindien"},
+  {t:"Recycler, c'est la forme la plus simple de l'amour de l'avenir.",a:"Carl Sagan"},
+  {t:"Chaque matière première recyclée est un cadeau fait à demain.",a:"Gro Harlem Brundtland"},
+  {t:"La nature souffre en silence. Le recyclage est notre façon de l'écouter.",a:"James Lovelock"},
+  {t:"Recycler, c'est comprendre que la liberté s'arrête où commence la pollution d'autrui.",a:"Voltaire"},
+  {t:"Un plastique recyclé est un acte de résistance contre le consumérisme.",a:"Naomi Klein"},
+  {t:"La pollution est la cicatrice visible de notre irresponsabilité.",a:"Aldo Leopold"},
+  {t:"Recycler, c'est transformer chaque fin de vie en début de nouvelle vie.",a:"Antoine Lavoisier"},
+  {t:"Chaque geste écologique est un vote pour la biodiversité future.",a:"Edward O. Wilson"},
+  {t:"La durabilité est le test de maturité d'une civilisation.",a:"Paul Hawken"},
+  {t:"Un déchet recyclé est la preuve que l'acte individuel a une portée collective.",a:"Barack Obama"},
+  {t:"La planète a besoin de moins de consommation et plus de conscience.",a:"David Suzuki"},
+  {t:"Recycler, c'est l'économie de l'intelligence appliquée à la matière.",a:"Walter Stahel"},
+  {t:"Chaque bouteille vide retournée est un enfant qui grandira dans un monde plus propre.",a:"Jane Goodall"},
+  {t:"La pollution est le prix que nous payons pour notre indifférence collective.",a:"Barry Commoner"},
+  {t:"Recycler, c'est refuser de capituler devant la logique du jetable.",a:"Naomi Klein"},
+  {t:"Un monde sans déchets est le rêve que chaque geste de recyclage bâtit.",a:"Ellen MacArthur"},
+  {t:"La nature nous a tout prêté. Le recyclage est le début du remboursement.",a:"Henry David Thoreau"},
+  {t:"Recycler, c'est la forme la plus concrète du respect de la vie.",a:"Albert Schweitzer"},
+  {t:"Chaque matière recyclée est une ressource que la nature ne doit pas refabriquer.",a:"Antoine Lavoisier"},
+  {t:"La biodiversité est la richesse que le recyclage contribue à préserver.",a:"Edward O. Wilson"},
+  {t:"Recycler, c'est agir avec la sagesse que la nature nous a enseignée.",a:"Lao Tseu"},
+  {t:"Un déchet recyclé est la preuve que l'intelligence humaine est au service de la vie.",a:"Carl Sagan"},
+  {t:"La durabilité est la condition de la liberté des générations futures.",a:"Hans Jonas"},
+  {t:"Recycler, c'est transformer son impact négatif en impact positif.",a:"Greta Thunberg"},
+  {t:"Chaque plastique récupéré est un engagement tenu envers la planète.",a:"Al Gore"},
+  {t:"La planète a survécu à des météorites. Elle ne survivra pas à notre indifférence.",a:"David Attenborough"},
+  {t:"Recycler, c'est l'acte le plus démocratique de l'écologie.",a:"Nelson Mandela"},
+  {t:"Un geste de recyclage est un mot dans le discours de la responsabilité.",a:"Barack Obama"},
+  {t:"La propreté de l'environnement est la première des libertés.",a:"Gandhi"},
+  {t:"Chaque tonne de plastique recyclée est une victoire de la conscience sur la commodité.",a:"Jane Goodall"},
+  {t:"La pollution est la preuve que l'humanité n'a pas encore atteint sa maturité.",a:"Albert Einstein"},
+  {t:"Recycler, c'est être l'auteur et non la victime de son impact sur la planète.",a:"Wangari Maathai"},
+  {t:"Un monde recyclé est un monde qui a compris la valeur de ce qu'il possède.",a:"Paul Hawken"},
+  {t:"La Terre a des ressources pour répondre aux besoins, pas aux avidités.",a:"Gandhi"},
+  {t:"Recycler, c'est le premier pas vers une économie qui ne détruit pas.",a:"Ellen MacArthur"},
+  {t:"Chaque emballage recyclé envoie un signal à l'industrie : changez vos pratiques.",a:"Naomi Klein"},
+  {t:"La durabilité est la première forme d'intelligence collective.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est honorer le travail de la nature sur des millions d'années.",a:"Aldo Leopold"},
+  {t:"Un déchet recyclé est une ressource qui a évité la mort prématurée.",a:"Walter Stahel"},
+  {t:"La planète nous observe. Le recyclage est notre meilleure réponse.",a:"James Lovelock"},
+  {t:"Recycler, c'est la première étape vers une civilisation qui dure.",a:"Arnold Toynbee"},
+  {t:"Chaque geste de tri est une brique dans le mur de la durabilité.",a:"Gro Harlem Brundtland"},
+  {t:"La nature ne jette rien. L'homme a beaucoup à apprendre d'elle.",a:"Antoine Lavoisier"},
+  {t:"Recycler, c'est inscrire son existence dans un projet collectif durable.",a:"Carl Sagan"},
+  {t:"Un plastique non recyclé est une hypothèque sur l'avenir de nos enfants.",a:"Barack Obama"},
+  {t:"La biodiversité est notre meilleure assurance contre l'incertitude.",a:"Edward O. Wilson"},
+  {t:"Recycler, c'est apporter sa contribution à la plus grande cause de notre temps.",a:"Greta Thunberg"},
+  {t:"Chaque déchet recyclé est une dette remboursée envers la planète.",a:"Al Gore"},
+  {t:"La pollution est le langage de ceux qui ont renoncé à penser à demain.",a:"Hubert Reeves"},
+  {t:"Recycler, c'est agir comme si chaque geste comptait. Parce qu'il compte.",a:"Jane Goodall"},
+  {t:"Un monde durable est construit geste après geste, déchet après déchet recyclé.",a:"Nelson Mandela"},
+  {t:"La propreté de notre planète est aussi une question de justice sociale.",a:"Martin Luther King Jr."},
+  {t:"Recycler, c'est la forme la plus modeste et la plus efficace du militantisme.",a:"David Suzuki"},
+  {t:"Chaque matière recyclée est un chapitre de l'économie circulaire.",a:"Ellen MacArthur"},
+  {t:"La Terre ne souffrira pas de notre recyclage. Elle souffrira de notre inaction.",a:"Pape François"},
+  {t:"Recycler, c'est refuser d'hériter d'un monde pollué et refuser de le transmettre tel quel.",a:"Wangari Maathai"},
+  {t:"Un déchet trié est le premier signe d'une société qui se respecte.",a:"Nicolas Hulot"},
+  {t:"La planète mérite mieux que nos déchets.",a:"Sylvia Earle"},
+  {t:"Recycler, c'est construire la maison que nos enfants habitueront.",a:"Albert Schweitzer"},
+  {t:"Chaque emballage récupéré est une victoire contre l'oubli environnemental.",a:"Barry Commoner"},
+  {t:"La durabilité est le cadeau le plus précieux que nous puissions offrir à l'avenir.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est comprendre que la matière est trop précieuse pour ne servir qu'une fois.",a:"Walter Stahel"},
+  {t:"Un monde propre est le projet le plus collectif de l'humanité.",a:"Barack Obama"},
+  {t:"La pollution plastique n'est pas une fatalité, c'est un choix que nous pouvons corriger.",a:"David Attenborough"},
+  {t:"Recycler, c'est transformer chaque geste du quotidien en acte de civilisation.",a:"Gandhi"},
+  {t:"Chaque plastique recyclé est un message d'espoir envoyé aux générations futures.",a:"Carl Sagan"},
+  {t:"La nature est patiente. Mais notre patience envers elle ne doit pas avoir de limites.",a:"James Lovelock"},
+  {t:"Recycler, c'est la forme la plus universelle de la responsabilité.",a:"Nelson Mandela"},
+  {t:"Un geste de recyclage unit tous les hommes dans le même projet de survie.",a:"Kofi Annan"},
+  {t:"La propreté de l'environnement est la condition de la dignité humaine.",a:"Gandhi"},
+  {t:"Recycler, c'est écrire le mot respect dans la langue des actes.",a:"Greta Thunberg"},
+  {t:"Chaque déchet recyclé témoigne de notre capacité à nous améliorer.",a:"Albert Einstein"},
+  {t:"La durabilité est l'horizon que chaque geste de recyclage rapproche.",a:"Ellen MacArthur"},
+  {t:"Recycler, c'est le geste le plus ancien de l'écologie moderne.",a:"Antoine Lavoisier"},
+  {t:"Un plastique récupéré est un enfant qui pourra nager dans un océan propre.",a:"Sylvia Earle"},
+  {t:"La pollution est la preuve que l'humanité n'a pas encore appris à vivre.",a:"Aldo Leopold"},
+  {t:"Recycler, c'est agir avec la cohérence que nos valeurs exigent.",a:"Barack Obama"},
+  {t:"Chaque bouteille vide récupérée est un signal envoyé à la planète : nous t'entendons.",a:"Jane Goodall"},
+  {t:"La planète a besoin de nos actes, pas de nos regrets.",a:"Wangari Maathai"},
+  {t:"Recycler, c'est transformer chaque fin de vie d'un produit en renaissance.",a:"Buckminster Fuller"},
+  {t:"Un monde durable est un monde où les déchets nourrissent d'autres cycles.",a:"Gunter Pauli"},
+  {t:"La biodiversité est le tissu de la vie. Le recyclage contribue à le préserver.",a:"Edward O. Wilson"},
+  {t:"Recycler, c'est le premier commandement de l'écologie citoyenne.",a:"Nicolas Hulot"},
+  {t:"Chaque matière recyclée est un pas vers une économie qui respecte ses limites.",a:"Gro Harlem Brundtland"},
+  {t:"La pollution est la dette que nous n'avons pas le droit de contracter.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est vivre en accord avec les lois de la nature.",a:"Henry David Thoreau"},
+  {t:"Un déchet recyclé est la preuve que notre intelligence peut compenser nos excès.",a:"Carl Sagan"},
+  {t:"La durabilité est l'objectif le plus noble que l'humanité puisse poursuivre.",a:"Pape François"},
+  {t:"Recycler, c'est donner à la matière la plus belle des secondes chances.",a:"Ellen MacArthur"},
+  {t:"Chaque geste de recyclage est un investissement dans la beauté du monde.",a:"John Keats"},
+  {t:"La planète n'a pas besoin de nos excuses, elle a besoin de nos actions.",a:"Greta Thunberg"},
+  {t:"Recycler, c'est refuser que la commodité détruise l'avenir.",a:"Naomi Klein"},
+  {t:"Un monde recyclé est un monde qui a choisi de durer.",a:"Nelson Mandela"},
+  {t:"La nature nous demande peu : juste de ne pas détruire ce qu'elle a mis des millénaires à créer.",a:"David Attenborough"},
+  {t:"Recycler, c'est l'acte le plus humble et le plus puissant à la fois.",a:"Albert Schweitzer"},
+  {t:"Chaque déchet bien trié est une pierre posée dans l'édifice du futur.",a:"Paul Hawken"},
+  {t:"Recycler, c'est choisir l'intelligence collective contre l'individualisme destructeur.",a:"Barack Obama"},
+  {t:"Un plastique recyclé est un sourire rendu à la planète.",a:"Jane Goodall"},
+  {t:"La durabilité est la forme la plus avancée de la civilisation humaine.",a:"Arnold Toynbee"},
+  {t:"Recycler, c'est transformer la culpabilité écologique en action concrète.",a:"Hubert Reeves"},
+  {t:"Chaque emballage récupéré est un engagement pour les générations futures.",a:"Kofi Annan"},
+  {t:"La planète nous juge à nos actes, pas à nos intentions.",a:"Gandhi"},
+  {t:"Recycler, c'est faire de la chimie citoyenne.",a:"Antoine Lavoisier"},
+  {t:"Un déchet recyclé est la plus belle réponse à la question environnementale.",a:"Albert Einstein"},
+  {t:"La protection de la nature est la condition de la protection de l'homme.",a:"Albert Schweitzer"},
+  {t:"Recycler, c'est agir pour que la Terre reste habitable.",a:"Carl Sagan"},
+  {t:"Chaque plastique non recyclé est une injure faite à la beauté du monde.",a:"Yann Arthus-Bertrand"},
+  {t:"La durabilité est la signature d'une civilisation responsable.",a:"Gro Harlem Brundtland"},
+  {t:"Recycler, c'est l'acte le plus démocratique qui soit : chacun peut le faire.",a:"Barack Obama"},
+  {t:"Un monde propre est la première richesse d'un peuple.",a:"Gandhi"},
+  {t:"La nature nous donne tout gratuitement. Recyclons au moins ses dons.",a:"David Suzuki"},
+  {t:"Recycler, c'est refuser l'héritage empoisonné de l'insouciance.",a:"Hans Jonas"},
+  {t:"Chaque citoyen qui recycle est un militant de la vie.",a:"Jane Goodall"},
+  {t:"La pollution est la preuve que l'économie de marché n'a pas encore trouvé ses limites.",a:"Barry Commoner"},
+  {t:"Recycler, c'est inscrire son geste dans le temps long de la civilisation.",a:"Arnold Toynbee"},
+  {t:"Un déchet recyclé est la preuve que le petit peut changer le grand.",a:"Margaret Mead"},
+  {t:"La durabilité est la forme la plus haute de l'amour du prochain.",a:"Pape François"},
+  {t:"Recycler, c'est agir comme si demain dépendait de nous. Parce que c'est le cas.",a:"Greta Thunberg"},
+  {t:"Chaque tonne recyclée est un pas de plus vers la planète de demain.",a:"Ellen MacArthur"},
+  {t:"La Terre parle. Nos déchets sont notre façon de l'ignorer.",a:"James Lovelock"},
+  {t:"Recycler, c'est la forme la plus concrète de l'espérance écologique.",a:"Hubert Reeves"},
+  {t:"Un plastique récupéré est la preuve que chaque geste a du sens.",a:"Wangari Maathai"},
+  {t:"La pollution plastique est le testament de notre irresponsabilité.",a:"David Attenborough"},
+  {t:"Recycler, c'est choisir de laisser le monde meilleur qu'on ne l'a trouvé.",a:"Robert Baden-Powell"},
+  {t:"Chaque emballage recyclé est un message d'amour à la planète.",a:"Carl Sagan"},
+  {t:"La durabilité est l'engagement le plus sérieux que l'on puisse prendre envers l'avenir.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est prouver que l'homme peut apprendre de ses erreurs.",a:"Charles Darwin"},
+  {t:"Un monde durable naît d'un geste simple : recycler.",a:"Kofi Annan"},
+  {t:"La nature est notre maison commune. Gardons-la propre.",a:"Pape François"},
+  {t:"Recycler, c'est la résistance concrète contre la barbarie du gaspillage.",a:"Naomi Klein"},
+  {t:"Chaque déchet recyclé porte en lui l'espoir d'un monde meilleur.",a:"Nelson Mandela"},
+  {t:"La durabilité commence par un geste : trier, recycler, préserver.",a:"Ellen MacArthur"},
+  {t:"Recycler, c'est montrer que la raison peut triompher du confort.",a:"Albert Einstein"},
+  {t:"Un plastique récupéré est un acte de résistance contre l'oubli écologique.",a:"Greta Thunberg"},
+  {t:"La planète mérite qu'on se batte pour elle. Le recyclage est notre arme.",a:"Jane Goodall"},
+  {t:"Recycler, c'est laisser derrière soi des traces de conscience.",a:"Wangari Maathai"},
+  {t:"Chaque matière recyclée prouve que l'homme peut être en harmonie avec la nature.",a:"Buckminster Fuller"},
+  {t:"La durabilité est la forme la plus noble de la solidarité humaine.",a:"Nelson Mandela"},
+  {t:"Recycler, c'est agir à la hauteur de l'héritage que nous voulons laisser.",a:"Barack Obama"},
+  {t:"Le recyclage est l'acte de foi le plus concret envers la nature.",a:"Albert Schweitzer"},
+  {t:"Chaque déchet recyclé est une promesse faite aux enfants du monde.",a:"Kofi Annan"},
+  {t:"La nature attend de nous que nous soyons dignes de ce qu'elle nous offre.",a:"Henry David Thoreau"},
+  {t:"Recycler, c'est rembourser une dette contractée sans le savoir.",a:"Hans Jonas"},
+  {t:"Un monde propre est le plus beau cadeau qu'une génération puisse faire à la suivante.",a:"Mandela"},
+  {t:"Recycler, c'est le premier acte de respect envers la Terre.",a:"David Attenborough"},
+  {t:"Un déchet trié est une ressource qui a trouvé sa voie.",a:"Ellen MacArthur"},
+  {t:"La pollution est la preuve que nous n'avons pas encore compris notre place dans la nature.",a:"Aldo Leopold"},
+  {t:"Recycler, c'est la forme la plus modeste de la révolution verte.",a:"Greta Thunberg"},
+  {t:"Chaque matière recyclée est un chapitre supplémentaire dans l'histoire de la vie.",a:"Carl Sagan"},
+  {t:"La durabilité est le seul avenir que la planète peut se permettre.",a:"Ban Ki-moon"},
+  {t:"Recycler, c'est refuser de rompre le pacte avec les générations futures.",a:"Hans Jonas"},
+  {t:"Un monde sans pollution plastique est un monde qui a choisi la vie.",a:"Sylvia Earle"},
+  {t:"La propreté de la planète est une affaire de volonté collective.",a:"Nelson Mandela"},
+  {t:"Recycler, c'est transformer chaque acte de consommation en acte de responsabilité.",a:"Barack Obama"},
+  {t:"Chaque emballage recyclé est un poème écrit à l'encre verte.",a:"Wangari Maathai"},
+  {t:"La durabilité est la mesure de notre intelligence comme espèce.",a:"Albert Einstein"},
+  {t:"Recycler, c'est prouver que l'homme peut vivre sans détruire.",a:"Jane Goodall"},
+  {t:"Un plastique récupéré est la preuve que le geste compte autant que l'intention.",a:"Gandhi"},
+  {t:"La pollution est le signe que nous avons oublié que la Terre est vivante.",a:"James Lovelock"},
+  {t:"Recycler, c'est inscrire son nom dans le registre des gens qui ont choisi l'avenir.",a:"Carl Sagan"},
+  {t:"Chaque tonne recyclée est une dette remboursée à la planète.",a:"Kofi Annan"},
+  {t:"La durabilité est le premier devoir de chaque civilisation qui veut durer.",a:"Arnold Toynbee"},
+  {t:"Recycler, c'est l'acte quotidien le plus proche de la sagesse écologique.",a:"Henry David Thoreau"},
+  {t:"Un déchet non recyclé est la preuve de l'indifférence érigée en système.",a:"Naomi Klein"},
+  {t:"La nature ne pollue pas. Apprenons d'elle.",a:"Buckminster Fuller"},
+  {t:"Recycler, c'est choisir la sobriété heureuse.",a:"Pierre Rabhi"},
+  {t:"Chaque plastique recyclé est un poisson qui vivra.",a:"David Attenborough"},
+  {t:"La propreté de demain dépend des gestes d'aujourd'hui.",a:"Wangari Maathai"},
+  {t:"Recycler, c'est la première leçon d'économie que la nature nous enseigne.",a:"Antoine Lavoisier"},
+  {t:"Un monde durable est le seul monde qui mérite d'être légué.",a:"Nelson Mandela"},
+  {t:"La durabilité, c'est vivre comme si demain existait.",a:"Gro Harlem Brundtland"},
+  {t:"Recycler, c'est agir maintenant pour que nos enfants puissent agir plus tard.",a:"Barack Obama"},
+  {t:"Chaque geste de recyclage est un acte de désobéissance civile contre le gaspillage.",a:"Naomi Klein"},
+  {t:"La pollution est le langage silencieux d'une société qui n'a pas appris à dire non.",a:"Barry Commoner"},
+  {t:"Recycler, c'est transformer la fin d'un usage en début d'une autre vie.",a:"Ellen MacArthur"},
+  {t:"Un plastique recyclé prouve que l'espèce humaine peut apprendre de ses erreurs.",a:"Charles Darwin"},
+];
+
+function getDayOfYear(d) {
+  const s = new Date(d.getFullYear(), 0, 0);
+  return Math.floor((d - s) / 86400000);
+}
+function getQuote(cat, date) {
+  const idx = (getDayOfYear(date) - 1 + 730) % 365;
+  const list = cat === "Eau" ? QE : QR;
+  const q = list[idx % list.length];
+  return { text: q.t, author: q.a };
+}
 
 /* ---------------------------------------------------------------------- */
 /* Données produits (catalogue figé : marque, format, unités par colis,   */
@@ -58,6 +809,7 @@ const EXPENSE_CATEGORIES = [
   "Salaires / main d'œuvre",
   "Entretien matériel",
   "Taxes / impôts",
+  "Recyclage (rachat de bouteilles)",
   "Autre",
 ];
 
@@ -66,6 +818,66 @@ const BRAND_COLOR = {
   CRISTAL: { dot: "bg-cyan-500", text: "text-cyan-700", bg: "bg-cyan-50", ring: "ring-cyan-200" },
   "EAU VITALE": { dot: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50", ring: "ring-emerald-200" },
 };
+
+// Palette de secours pour toute nouvelle marque ajoutée plus tard (non
+// prévue à l'avance) — cycle sur quelques couleurs distinctes.
+const FALLBACK_BRAND_COLORS = [
+  { dot: "bg-amber-500", text: "text-amber-700", bg: "bg-amber-50", ring: "ring-amber-200" },
+  { dot: "bg-violet-500", text: "text-violet-700", bg: "bg-violet-50", ring: "ring-violet-200" },
+  { dot: "bg-rose-500", text: "text-rose-700", bg: "bg-rose-50", ring: "ring-rose-200" },
+  { dot: "bg-lime-500", text: "text-lime-700", bg: "bg-lime-50", ring: "ring-lime-200" },
+  { dot: "bg-indigo-500", text: "text-indigo-700", bg: "bg-indigo-50", ring: "ring-indigo-200" },
+];
+function getBrandColor(brand) {
+  if (BRAND_COLOR[brand]) return BRAND_COLOR[brand];
+  let hash = 0;
+  for (let i = 0; i < (brand || "").length; i++) hash = (hash * 31 + brand.charCodeAt(i)) | 0;
+  return FALLBACK_BRAND_COLORS[Math.abs(hash) % FALLBACK_BRAND_COLORS.length];
+}
+
+// Liste des marques réellement présentes dans le catalogue (figées +
+// ajoutées manuellement plus tard), dans un ordre stable.
+function brandsOf(products) {
+  const seen = [];
+  (products || []).forEach((p) => {
+    if (!seen.includes(p.brand)) seen.push(p.brand);
+  });
+  return seen;
+}
+
+// Recyclage : les bouteilles vides sont rachetées à l'unité, quelle que soit
+// l'emballage (carton/pack/bouteille) sous lequel cette contenance existe
+// dans le catalogue. On extrait donc la contenance d'une bouteille (ex:
+// "Carton 12x1,5L" -> 1.5) pour regrouper le stock par marque + contenance,
+// plutôt que par article exact.
+function capacityOf(product) {
+  const match = (product.format || "").match(/(\d+(?:[.,]\d+)?)\s*L\b/);
+  if (!match) return 0;
+  return parseFloat(match[1].replace(",", "."));
+}
+function capacityKey(product) {
+  return `${product.brand}::${capacityOf(product)}`;
+}
+function capacityLabel(product) {
+  const c = capacityOf(product);
+  return `${product.brand} ${c ? c + "L" : product.format}`;
+}
+
+// Options de sélection pour le recyclage : une seule ligne par contenance
+// distincte d'une marque (ex: "1,5L"), sans mention de carton/pack — pour
+// éviter toute confusion, puisque le rachat se fait toujours à l'unité.
+function capacityOptionsFor(products, brand) {
+  const seen = new Map();
+  (products || [])
+    .filter((p) => p.brand === brand)
+    .forEach((p) => {
+      const cap = capacityOf(p);
+      if (!seen.has(cap)) seen.set(cap, p.id);
+    });
+  return Array.from(seen.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([cap, id]) => ({ value: id, label: cap ? `${cap}L` : "Contenance inconnue" }));
+}
 
 const round50 = (n) => Math.round(n / 25) * 25;
 
@@ -178,6 +990,8 @@ function defaultData() {
     withdrawals: [],
     personalNotes: [],
     expenses: [],
+    recyclingCollections: [],
+    recyclingSales: [],
   };
 }
 
@@ -187,6 +1001,8 @@ function migrate(d) {
   if (!d.withdrawals) d = { ...d, withdrawals: [] };
   if (!d.personalNotes) d = { ...d, personalNotes: [] };
   if (!d.expenses) d = { ...d, expenses: [] };
+  if (!d.recyclingCollections) d = { ...d, recyclingCollections: [] };
+  if (!d.recyclingSales) d = { ...d, recyclingSales: [] };
   if (d.loans && d.loans.some((l) => !l.repayments)) {
     d = {
       ...d,
@@ -722,8 +1538,98 @@ export default function App({ uid: currentUid, onSignOut }) {
     showToast("Dépense supprimée");
   };
 
+  // Recyclage : collecte de bouteilles vides chez les clients — gratuite la
+  // plupart du temps, mais parfois rachetée. Si un prix est indiqué, ça
+  // génère automatiquement une dépense liée (catégorie dédiée), pour que la
+  // trésorerie et les rapports en tiennent compte comme n'importe quelle
+  // autre dépense de l'entreprise.
+  const addRecyclingCollection = (c) => {
+    const unitCost = Number(c.unitCost) || 0;
+    let expenses = data.expenses;
+    let expenseId = null;
+    if (unitCost > 0) {
+      expenseId = uid();
+      const p = data.products.find((x) => x.id === c.productId);
+      const capLabel = p ? (capacityOf(p) ? `${capacityOf(p)}L` : p.format) : "";
+      expenses = [
+        {
+          id: expenseId,
+          date: c.date,
+          category: "Recyclage (rachat de bouteilles)",
+          label: `${c.quantity} bouteille(s) ${p ? p.brand + " " + capLabel : ""}${c.client ? " — " + c.client : ""}`.trim(),
+          amount: c.quantity * unitCost,
+        },
+        ...expenses,
+      ];
+    }
+    const next = {
+      ...data,
+      recyclingCollections: [{ id: uid(), ...c, unitCost, expenseId }, ...data.recyclingCollections],
+      expenses,
+    };
+    persist(next);
+    showToast(unitCost > 0 ? "Collecte enregistrée (dépense créée)" : "Collecte enregistrée");
+  };
+
+  const deleteRecyclingCollection = (id) => {
+    const col = data.recyclingCollections.find((c) => c.id === id);
+    persist({
+      ...data,
+      recyclingCollections: data.recyclingCollections.filter((c) => c.id !== id),
+      expenses: col && col.expenseId ? data.expenses.filter((e) => e.id !== col.expenseId) : data.expenses,
+    });
+    showToast("Collecte supprimée");
+  };
+
+  const addRecyclingSale = (s) => {
+    const soldProduct = data.products.find((p) => p.id === s.productId);
+    const key = soldProduct ? capacityKey(soldProduct) : null;
+    const sameBucket = (pid) => {
+      const p = data.products.find((x) => x.id === pid);
+      return p && key && capacityKey(p) === key;
+    };
+    const available =
+      data.recyclingCollections.filter((c) => sameBucket(c.productId)).reduce((sum, c) => sum + c.quantity, 0) -
+      data.recyclingSales.filter((x) => sameBucket(x.productId)).reduce((sum, x) => sum + x.quantity, 0);
+    if (s.quantity > available) {
+      showToast(`Stock de bouteilles insuffisant pour cette contenance (${available} disponibles)`, "error");
+      return false;
+    }
+    const next = { ...data, recyclingSales: [{ id: uid(), ...s }, ...data.recyclingSales] };
+    persist(next);
+    showToast("Vente de recyclage enregistrée");
+    return true;
+  };
+
+  const deleteRecyclingSale = (id) => {
+    persist({ ...data, recyclingSales: data.recyclingSales.filter((s) => s.id !== id) });
+    showToast("Vente de recyclage supprimée");
+  };
+
   const updateProduct = (id, patch) => {
     persist({ ...data, products: data.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  };
+
+  // Nouvelle marque ou nouveau format ajouté manuellement — démarre avec un
+  // stock vide (à réapprovisionner ensuite normalement).
+  const addProduct = (p) => {
+    const id = `custom-${uid()}`;
+    const product = {
+      id,
+      brand: p.brand.trim().toUpperCase(),
+      format: p.format.trim(),
+      units: Number(p.units),
+      purchase: Number(p.purchase),
+      sellPrice: Number(p.sellPrice),
+      retailPrice: Number(p.retailPrice),
+    };
+    const next = {
+      ...data,
+      products: [...data.products, product],
+      lots: { ...data.lots, [id]: { gros: [], detail: [] } },
+    };
+    persist(next);
+    showToast("Article ajouté au catalogue");
   };
 
   const setInitialCash = (v) => persist({ ...data, meta: { ...data.meta, initialCash: v } });
@@ -759,6 +1665,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     { key: "loans", label: "Prêts", icon: HandCoins },
     { key: "stock", label: "Stock", icon: Boxes },
     { key: "expenses", label: "Dépenses", icon: Receipt },
+    { key: "recycling", label: "Recyclage", icon: Recycle },
     { key: "balance", label: "Bilan", icon: PiggyBank },
     { key: "settings", label: "Produits", icon: Settings },
   ];
@@ -816,6 +1723,17 @@ export default function App({ uid: currentUid, onSignOut }) {
         {tab === "loans" && <LoansTab data={data} onAdd={addLoan} onRepay={repayLoan} onDelete={deleteLoan} onDeleteRepayment={deleteRepayment} />}
         {tab === "stock" && <StockTab data={data} productsById={productsById} totals={totals} onRestock={addRestock} onDeleteRestock={deleteRestock} />}
         {tab === "expenses" && <ExpensesTab data={data} totals={totals} onAdd={addExpense} onDelete={deleteExpense} />}
+        {tab === "recycling" && (
+          <RecyclingTab
+            data={data}
+            totals={totals}
+            productsById={productsById}
+            onAddCollection={addRecyclingCollection}
+            onDeleteCollection={deleteRecyclingCollection}
+            onAddSale={addRecyclingSale}
+            onDeleteSale={deleteRecyclingSale}
+          />
+        )}
         {tab === "balance" && (
           <BalanceTab
             data={data}
@@ -830,7 +1748,7 @@ export default function App({ uid: currentUid, onSignOut }) {
             onDeletePersonalNote={deletePersonalNote}
           />
         )}
-        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onRestore={restoreData} onExported={markExported} />}
+        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} />}
       </main>
 
       <nav
@@ -880,7 +1798,24 @@ function computeTotals(data) {
   const withdrawalsTotal = (data.withdrawals || []).reduce((s, x) => s + x.amount, 0);
   const expensesTotal = (data.expenses || []).reduce((s, x) => s + x.amount, 0);
 
-  const treasury = data.meta.initialCash + paidSales + paidDetail - restockCost - loanedOut + loanRepaid - withdrawalsTotal - expensesTotal;
+  // Recyclage : bouteilles vides collectées gratuitement chez les clients
+  // (protection de l'environnement) puis revendues — coût nul, donc le
+  // produit de la vente est un bénéfice pur, et vient s'ajouter en trésorerie.
+  const recyclingCollected = (data.recyclingCollections || []).reduce((s, c) => s + c.quantity, 0);
+  const recyclingSoldQty = (data.recyclingSales || []).reduce((s, c) => s + c.quantity, 0);
+  const recyclingStock = recyclingCollected - recyclingSoldQty;
+  const recyclingRevenue = (data.recyclingSales || []).reduce((s, c) => s + c.quantity * c.unitPrice, 0);
+
+  const treasury =
+    data.meta.initialCash +
+    paidSales +
+    paidDetail -
+    restockCost -
+    loanedOut +
+    loanRepaid -
+    withdrawalsTotal -
+    expensesTotal +
+    recyclingRevenue;
 
   const receivables =
     data.sales.reduce((s, x) => s + Math.max(0, x.qty * x.unitPrice - x.paidAmount), 0) +
@@ -981,6 +1916,10 @@ function computeTotals(data) {
     netResult,
     withdrawalsTotal,
     expensesTotal,
+    recyclingStock,
+    recyclingCollected,
+    recyclingSoldQty,
+    recyclingRevenue,
     profitOf,
     revenueOf,
     today: { profit: sumProfit(todayOps), revenue: sumRevenue(todayOps), count: todayOps.length },
@@ -1116,7 +2055,7 @@ function DateNav({ value, onChange }) {
 }
 
 function Dashboard({ data, totals, productsById }) {
-  const brands = ["VOLTIC", "CRISTAL", "EAU VITALE"];
+  const brands = brandsOf(data.products);
   const [journalDate, setJournalDate] = useState(todayISO());
   const journalOps = useMemo(
     () => totals.allOps.filter((o) => o.date === journalDate).sort((a, b) => (a.id < b.id ? 1 : -1)),
@@ -1213,15 +2152,20 @@ function Dashboard({ data, totals, productsById }) {
     const ops = totals.allOps.filter((o) => inRange(o.date));
     const expenses = (data.expenses || []).filter((e) => inRange(e.date));
     const restocks = (data.restocks || []).filter((r) => inRange(r.date));
+    const recyclingSales = (data.recyclingSales || []).filter((s) => inRange(s.date));
     const ventesCA = ops.reduce((s, o) => s + totals.revenueOf(o), 0);
     const benefice = ops.reduce((s, o) => s + totals.profitOf(o), 0);
     const depenses = expenses.reduce((s, e) => s + e.amount, 0);
     const achats = restocks.reduce((s, r) => s + r.qty * r.unitCost, 0);
-    return { count: ops.length, ventesCA, benefice, depenses, achats, resultat: benefice - depenses };
-  }, [totals.allOps, data.expenses, data.restocks, reportStart, reportEnd, totals]);
+    const recyclage = recyclingSales.reduce((s, r) => s + r.quantity * r.unitPrice, 0);
+    return { count: ops.length, ventesCA, benefice, depenses, achats, recyclage, resultat: benefice + recyclage - depenses };
+  }, [totals.allOps, data.expenses, data.restocks, data.recyclingSales, reportStart, reportEnd, totals]);
 
   const fmtShort = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
   const reportLabel = reportStart === reportEnd ? fmtShort(reportStart) : `du ${fmtShort(reportStart)} au ${fmtShort(reportEnd)}`;
+
+  const waterQuote = useMemo(() => getQuote("Eau", new Date()), []);
+  const recyclingQuote = useMemo(() => getQuote("Recyclage", new Date()), []);
 
   return (
     <div className="space-y-3">
@@ -1233,6 +2177,26 @@ function Dashboard({ data, totals, productsById }) {
             : "Aucune sauvegarde exportée pour l'instant — fais-en une dans l'onglet Produits."}
         </div>
       )}
+
+      <Card>
+        <SectionTitle icon={Droplet}>Citations du jour</SectionTitle>
+        <div className="space-y-3">
+          <div className="bg-sky-50 rounded-xl p-3">
+            <p className="text-sm text-slate-700 italic">"{waterQuote.text}"</p>
+            <p className="text-xs text-slate-500 mt-1">— {waterQuote.author}</p>
+          </div>
+          <div className="bg-emerald-50 rounded-xl p-3">
+            <p className="text-sm text-slate-700 italic">"{recyclingQuote.text}"</p>
+            <p className="text-xs text-slate-500 mt-1">— {recyclingQuote.author}</p>
+          </div>
+          <ShareOrCopy
+            getText={() =>
+              `💧 "${waterQuote.text}" — ${waterQuote.author}\n\n♻️ "${recyclingQuote.text}" — ${recyclingQuote.author}\n\nMultivers'Eau`
+            }
+          />
+        </div>
+      </Card>
+
       <div className="grid grid-cols-3 gap-2">
         <StatCard label="Bénéfice jour" value={fcfa(totals.today.profit)} sub={`${totals.today.count} vente(s)`} />
         <StatCard label="Bénéfice mois" value={fcfa(totals.month.profit)} tone="slate" />
@@ -1308,9 +2272,10 @@ function Dashboard({ data, totals, productsById }) {
         <Row label="Ventes (CA)" value={fcfa(reportStats.ventesCA)} />
         <Row label="Achats (réappro)" value={fcfa(reportStats.achats)} />
         <Row label="Dépenses" value={fcfa(reportStats.depenses)} />
-        <Row label="Bénéfice brut" value={fcfa(reportStats.benefice)} />
+        <Row label="Recyclage (bénéfice pur)" value={fcfa(reportStats.recyclage)} />
+        <Row label="Bénéfice brut (eau)" value={fcfa(reportStats.benefice)} />
         <Row
-          label="Résultat (bénéfice − dépenses)"
+          label="Résultat (bénéfice + recyclage − dépenses)"
           value={fcfa(reportStats.resultat)}
           bold
           tone={reportStats.resultat >= 0 ? "teal" : "rose"}
@@ -1322,7 +2287,8 @@ function Dashboard({ data, totals, productsById }) {
             `Ventes (CA) : ${fcfa(reportStats.ventesCA)}\n` +
             `Achats (réappro) : ${fcfa(reportStats.achats)}\n` +
             `Dépenses : ${fcfa(reportStats.depenses)}\n` +
-            `Bénéfice brut : ${fcfa(reportStats.benefice)}\n` +
+            `Recyclage : ${fcfa(reportStats.recyclage)}\n` +
+            `Bénéfice brut (eau) : ${fcfa(reportStats.benefice)}\n` +
             `Résultat : ${fcfa(reportStats.resultat)}`
           }
         />
@@ -1396,7 +2362,7 @@ function Dashboard({ data, totals, productsById }) {
           {bestSellers.map(({ id, gros, detail, p }) => (
             <li key={id} className="py-1.5 text-sm">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className={`w-2 h-2 rounded-full ${BRAND_COLOR[p.brand].dot}`} />
+                <span className={`w-2 h-2 rounded-full ${getBrandColor(p.brand).dot}`} />
                 {p.brand} — {p.format}
               </div>
               <div className="flex justify-end gap-4 text-xs">
@@ -1414,7 +2380,7 @@ function Dashboard({ data, totals, productsById }) {
 
       <div className="grid grid-cols-3 gap-2 mb-4">
         {brands.map((b) => {
-          const c = BRAND_COLOR[b];
+          const c = getBrandColor(b);
           const stockQty = Object.entries(data.lots)
             .filter(([id]) => id.startsWith(b))
             .reduce((s, [, row]) => s + lotsQty(row.gros), 0);
@@ -1492,7 +2458,7 @@ function CatchUpBatch({ data, productsById, onBatchAdd, onClose }) {
               <Input placeholder="Client" value={r.client} onChange={(e) => updateRow(r.rid, { client: e.target.value })} />
             </div>
             <div className="grid grid-cols-3 gap-1.5">
-              <Select value={r.brand} onChange={(v) => onBrandChange(r.rid, v)} options={["VOLTIC", "CRISTAL", "EAU VITALE"].map((b) => ({ value: b, label: b }))} />
+              <Select value={r.brand} onChange={(v) => onBrandChange(r.rid, v)} options={brandsOf(data.products).map((b) => ({ value: b, label: b }))} />
               <div className="col-span-2">
                 <Select value={r.productId} onChange={(v) => onProductChange(r.rid, v)} options={opts} placeholder="Format" />
               </div>
@@ -1555,7 +2521,7 @@ function SalesTab({ data, productsById, onAdd, onBatchAdd, onDelete }) {
               setBrand(v);
               setForm((f) => ({ ...f, productId: "", unitPrice: "" }));
             }}
-            options={["VOLTIC", "CRISTAL", "EAU VITALE"].map((b) => ({ value: b, label: b }))}
+            options={brandsOf(data.products).map((b) => ({ value: b, label: b }))}
           />
           <div className="col-span-2">
             <Select value={form.productId} onChange={onProductChange} options={options} placeholder="Choisir le format" />
@@ -1731,7 +2697,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
         </p>
         <div className="grid grid-cols-3 gap-2 mb-2">
           <Input type="date" value={openDate} onChange={(e) => setOpenDate(e.target.value)} />
-          <Select value={brand} onChange={(v) => { setBrand(v); setOpenId(""); }} options={["VOLTIC", "CRISTAL", "EAU VITALE"].map((b) => ({ value: b, label: b }))} />
+          <Select value={brand} onChange={(v) => { setBrand(v); setOpenId(""); }} options={brandsOf(data.products).map((b) => ({ value: b, label: b }))} />
           <Select value={openId} onChange={setOpenId} options={openableOptions} placeholder="Colis" />
         </div>
         {openId && (
@@ -1752,7 +2718,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
           <Input placeholder="Nom du client" value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} />
         </div>
         <div className="grid grid-cols-3 gap-2 mb-2">
-          <Select value={brand} onChange={(v) => { setBrand(v); setForm((f) => ({ ...f, productId: "", unitPrice: "" })); }} options={["VOLTIC", "CRISTAL", "EAU VITALE"].map((b) => ({ value: b, label: b }))} />
+          <Select value={brand} onChange={(v) => { setBrand(v); setForm((f) => ({ ...f, productId: "", unitPrice: "" })); }} options={brandsOf(data.products).map((b) => ({ value: b, label: b }))} />
           <div className="col-span-2">
             <Select value={form.productId} onChange={onProductChange} options={sellableOptions} placeholder="Article (stock détail)" />
           </div>
@@ -2074,6 +3040,42 @@ function PrintOrCopy({ getText, className = "" }) {
   );
 }
 
+// Pour partager un texte (ex: citation du jour) vers WhatsApp, SMS, etc. —
+// tente le partage natif du téléphone en premier, et retombe sur une copie
+// texte garantie si ce n'est pas disponible sur ce navigateur.
+function ShareOrCopy({ getText, title = "Multivers'Eau", className = "" }) {
+  const [status, setStatus] = useState(null);
+
+  const share = async () => {
+    const text = getText();
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return; // l'utilisateur a annulé, rien à signaler
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("copied");
+    } catch (e) {
+      setStatus("error");
+    }
+    setTimeout(() => setStatus(null), 2500);
+  };
+
+  return (
+    <div className={className}>
+      <Btn kind="ghost" onClick={share} className="w-full">
+        <Recycle size={14} /> Partager
+      </Btn>
+      {status === "copied" && <p className="text-xs text-teal-700 mt-1">Copié ! Colle-le dans WhatsApp, Notes, etc.</p>}
+      {status === "error" && <p className="text-xs text-rose-600 mt-1">Partage indisponible ici — réessaie depuis Chrome ou Brave.</p>}
+    </div>
+  );
+}
+
 /* --------------------------------- Prêts ---------------------------------- */
 
 function LoansTab({ data, onAdd, onRepay, onDelete, onDeleteRepayment }) {
@@ -2226,7 +3228,7 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
     setForm({ date: todayISO(), productId: "", qty: 1, unitCost: "", updateReference: true });
   };
 
-  const brands = ["VOLTIC", "CRISTAL", "EAU VITALE"];
+  const brands = brandsOf(data.products);
   const priceChanged = form.productId && Number(form.unitCost) !== productsById[form.productId]?.purchase;
 
   // Totaux généraux, toutes marques et tous formats confondus — ce qu'il
@@ -2321,7 +3323,7 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
       </Card>
 
       {brands.map((b) => {
-        const c = BRAND_COLOR[b];
+        const c = getBrandColor(b);
         const rows = data.products.filter((p) => p.brand === b);
         const brandGros = rows.reduce((s, p) => s + lotsQty(data.lots[p.id]?.gros), 0);
         const brandDetail = rows.reduce((s, p) => s + lotsQty(data.lots[p.id]?.detail), 0);
@@ -2490,6 +3492,209 @@ function ExpensesTab({ data, totals, onAdd, onDelete }) {
   );
 }
 
+
+/* -------------------------------- Recyclage --------------------------------- */
+
+function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCollection, onAddSale, onDeleteSale }) {
+  const brands = brandsOf(data.products);
+  const [colBrand, setColBrand] = useState(brands[0] || "");
+  const [colForm, setColForm] = useState({ date: todayISO(), client: "", productId: "", quantity: 1, unitCost: "", note: "" });
+  const [saleBrand, setSaleBrand] = useState(brands[0] || "");
+  const [saleForm, setSaleForm] = useState({ date: todayISO(), buyer: "", productId: "", quantity: 1, unitPrice: "", note: "" });
+
+  // Stock de bouteilles vides rachetées à l'unité, regroupé par marque +
+  // contenance (pas par article exact) — que la bouteille provienne d'un
+  // carton, d'un pack ou d'une bouteille seule, elle rejoint le même total
+  // dès qu'elle fait la même contenance pour la même marque.
+  const stockByBucket = useMemo(() => {
+    const map = {};
+    (data.recyclingCollections || []).forEach((c) => {
+      const p = productsById[c.productId];
+      const key = p ? capacityKey(p) : "?";
+      map[key] = (map[key] || 0) + c.quantity;
+    });
+    (data.recyclingSales || []).forEach((s) => {
+      const p = productsById[s.productId];
+      const key = p ? capacityKey(p) : "?";
+      map[key] = (map[key] || 0) - s.quantity;
+    });
+    return map;
+  }, [data.recyclingCollections, data.recyclingSales, productsById]);
+
+  const bucketLabel = (key) => {
+    if (key === "?") return "Non spécifié";
+    const [brand, cap] = key.split("::");
+    return `${brand} ${cap}L`;
+  };
+
+  const productLabel = (id) => {
+    const p = productsById[id];
+    if (!p) return "Article non spécifié";
+    const cap = capacityOf(p);
+    return `${p.brand} — ${cap ? cap + "L" : p.format}`;
+  };
+
+  const submitCollection = () => {
+    if (!colForm.productId || !colForm.quantity) return;
+    onAddCollection({ ...colForm, quantity: Number(colForm.quantity), unitCost: Number(colForm.unitCost) || 0 });
+    setColForm({ date: todayISO(), client: "", productId: "", quantity: 1, unitCost: "", note: "" });
+  };
+
+  const submitSale = () => {
+    if (!saleForm.productId || !saleForm.quantity || !saleForm.unitPrice) return;
+    const ok = onAddSale({ ...saleForm, quantity: Number(saleForm.quantity), unitPrice: Number(saleForm.unitPrice) });
+    if (ok) setSaleForm({ date: todayISO(), buyer: "", productId: "", quantity: 1, unitPrice: "", note: "" });
+  };
+
+  const colOptions = capacityOptionsFor(data.products, colBrand);
+  const saleOptions = capacityOptionsFor(data.products, saleBrand);
+  const saleAvailable = saleForm.productId && productsById[saleForm.productId]
+    ? stockByBucket[capacityKey(productsById[saleForm.productId])] || 0
+    : 0;
+  const collectionCost = (data.recyclingCollections || []).reduce((s, c) => s + c.quantity * (c.unitCost || 0), 0);
+  const netMargin = totals.recyclingRevenue - collectionCost;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard label="Bouteilles vides en stock" value={totals.recyclingStock} />
+        <StatCard label="Revenu recyclage cumulé" value={fcfa(totals.recyclingRevenue)} tone="teal" />
+        <StatCard label="Coût des bouteilles rachetées" value={fcfa(collectionCost)} tone="amber" />
+        <StatCard label="Marge nette recyclage" value={fcfa(netMargin)} tone={netMargin >= 0 ? "teal" : "rose"} />
+      </div>
+      <PrintOrCopy
+        getText={() =>
+          `Recyclage — Multivers'Eau\n` +
+          `Bouteilles collectées : ${totals.recyclingCollected}\nBouteilles vendues : ${totals.recyclingSoldQty}\nStock actuel : ${totals.recyclingStock}\nRevenu cumulé : ${fcfa(
+            totals.recyclingRevenue
+          )}\nCoût des rachats : ${fcfa(collectionCost)}\nMarge nette : ${fcfa(netMargin)}\n\n` +
+          Object.entries(stockByBucket)
+            .filter(([, q]) => q !== 0)
+            .map(([key, q]) => `${bucketLabel(key)} : ${q}`)
+            .join("\n")
+        }
+      />
+
+      <Card>
+        <SectionTitle icon={Recycle}>Stock disponible par contenance</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Rachetées à l'unité — carton, pack ou bouteille seule, peu importe l'emballage d'origine : ce qui compte, c'est la marque et
+          la contenance.
+        </p>
+        {Object.entries(stockByBucket).filter(([, q]) => q !== 0).length === 0 && (
+          <p className="text-sm text-slate-400">Aucun stock pour l'instant.</p>
+        )}
+        <ul className="divide-y divide-slate-100">
+          {Object.entries(stockByBucket)
+            .filter(([, q]) => q !== 0)
+            .map(([key, q]) => (
+              <li key={key} className="py-1.5 flex justify-between text-sm">
+                <span>{bucketLabel(key)}</span>
+                <span className="font-mono font-semibold">{q}</span>
+              </li>
+            ))}
+        </ul>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Recycle}>Collecte de bouteilles vides</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Le plus souvent gratuite (le client te les donne). Si tu payes le client pour ses bouteilles, indique le prix payé par
+          bouteille ci-dessous : ça enregistre automatiquement une dépense correspondante dans l'onglet Dépenses.
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="date" value={colForm.date} onChange={(e) => setColForm({ ...colForm, date: e.target.value })} />
+          <Input placeholder="Client (optionnel)" value={colForm.client} onChange={(e) => setColForm({ ...colForm, client: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          <Select value={colBrand} onChange={(v) => { setColBrand(v); setColForm({ ...colForm, productId: "" }); }} options={brands.map((b) => ({ value: b, label: b }))} />
+          <div className="col-span-2">
+            <Select value={colForm.productId} onChange={(v) => setColForm({ ...colForm, productId: v })} options={colOptions} placeholder="Contenance" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="number" min="1" placeholder="Quantité (unités)" value={colForm.quantity} onChange={(e) => setColForm({ ...colForm, quantity: e.target.value })} />
+          <Input type="number" min="0" placeholder="Prix payé/bouteille (0 = gratuit)" value={colForm.unitCost} onChange={(e) => setColForm({ ...colForm, unitCost: e.target.value })} />
+        </div>
+        <Input placeholder="Note (optionnel)" value={colForm.note} onChange={(e) => setColForm({ ...colForm, note: e.target.value })} className="mb-2" />
+        {colForm.quantity && Number(colForm.unitCost) > 0 && (
+          <div className="text-xs text-amber-600 mb-2">
+            Dépense générée : <b>{fcfa(colForm.quantity * colForm.unitCost)}</b>
+          </div>
+        )}
+        <Btn onClick={submitCollection} className="w-full">
+          <Plus size={16} /> Enregistrer la collecte
+        </Btn>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Recycle}>Vente des bouteilles collectées</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">Coût nul (collecte gratuite), donc tout ce que tu encaisses ici est du bénéfice pur.</p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="date" value={saleForm.date} onChange={(e) => setSaleForm({ ...saleForm, date: e.target.value })} />
+          <Input placeholder="Acheteur" value={saleForm.buyer} onChange={(e) => setSaleForm({ ...saleForm, buyer: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          <Select value={saleBrand} onChange={(v) => { setSaleBrand(v); setSaleForm({ ...saleForm, productId: "" }); }} options={brands.map((b) => ({ value: b, label: b }))} />
+          <div className="col-span-2">
+            <Select value={saleForm.productId} onChange={(v) => setSaleForm({ ...saleForm, productId: v })} options={saleOptions} placeholder="Contenance" />
+          </div>
+        </div>
+        {saleForm.productId && (
+          <div className="text-xs text-slate-500 mb-2">
+            Stock disponible pour cette contenance : <b>{saleAvailable}</b> bouteille(s)
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="number" min="1" placeholder="Quantité vendue" value={saleForm.quantity} onChange={(e) => setSaleForm({ ...saleForm, quantity: e.target.value })} />
+          <Input type="number" placeholder="Prix unitaire" value={saleForm.unitPrice} onChange={(e) => setSaleForm({ ...saleForm, unitPrice: e.target.value })} />
+        </div>
+        {saleForm.quantity && saleForm.unitPrice && (
+          <div className="text-xs text-slate-500 mb-2">
+            Total : <b className="text-teal-700">{fcfa(saleForm.quantity * saleForm.unitPrice)}</b>
+          </div>
+        )}
+        <Btn onClick={submitSale} className="w-full">
+          <Plus size={16} /> Enregistrer la vente
+        </Btn>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Recycle}>Historique des collectes</SectionTitle>
+        {data.recyclingCollections.length === 0 && <p className="text-sm text-slate-400">Aucune collecte enregistrée.</p>}
+        <ul className="divide-y divide-slate-100">
+          {data.recyclingCollections.map((c) => (
+            <li key={c.id} className="py-1.5 flex items-center justify-between text-xs">
+              <span className="text-slate-600">
+                {new Date(c.date).toLocaleDateString("fr-FR")} — {productLabel(c.productId)} — {c.client || "Client anonyme"} :{" "}
+                {c.quantity} bouteille(s)
+                {c.unitCost > 0 ? ` — payé ${fcfa(c.quantity * c.unitCost)}` : " (gratuit)"}
+                {c.note ? ` (${c.note})` : ""}
+              </span>
+              <ConfirmDeleteButton onConfirm={() => onDeleteCollection(c.id)} label={`Supprimer cette collecte de ${c.quantity} bouteille(s) ?`} />
+            </li>
+          ))}
+        </ul>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Recycle}>Historique des ventes</SectionTitle>
+        {data.recyclingSales.length === 0 && <p className="text-sm text-slate-400">Aucune vente enregistrée.</p>}
+        <ul className="divide-y divide-slate-100">
+          {data.recyclingSales.map((s) => (
+            <li key={s.id} className="py-1.5 flex items-center justify-between text-xs">
+              <span className="text-slate-600">
+                {new Date(s.date).toLocaleDateString("fr-FR")} — {productLabel(s.productId)} — {s.buyer || "Acheteur"} : {s.quantity} ×{" "}
+                {fcfa(s.unitPrice)} = {fcfa(s.quantity * s.unitPrice)}
+              </span>
+              <ConfirmDeleteButton onConfirm={() => onDeleteSale(s.id)} label={`Supprimer cette vente (${fcfa(s.quantity * s.unitPrice)}) ?`} />
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
 
 function BalanceTab({
   data,
@@ -2737,13 +3942,29 @@ function ProgressBar({ value, target }) {
 
 /* -------------------------------- Paramètres --------------------------------- */
 
-function SettingsTab({ data, onUpdate, onRestore, onExported }) {
-  const brands = ["VOLTIC", "CRISTAL", "EAU VITALE"];
+function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported }) {
+  const brands = brandsOf(data.products);
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pastedJson, setPastedJson] = useState("");
+  const [newProduct, setNewProduct] = useState({
+    brand: "",
+    customBrand: "",
+    format: "",
+    units: "",
+    purchase: "",
+    sellPrice: "",
+    retailPrice: "",
+  });
+
+  const submitNewProduct = () => {
+    const brand = newProduct.brand === "__new__" ? newProduct.customBrand : newProduct.brand;
+    if (!brand || !newProduct.format || !newProduct.units || !newProduct.purchase || !newProduct.sellPrice) return;
+    onAddProduct({ ...newProduct, brand });
+    setNewProduct({ brand: "", customBrand: "", format: "", units: "", purchase: "", sellPrice: "", retailPrice: "" });
+  };
 
   const backupJson = () => JSON.stringify(data, null, 2);
   const backupFilename = () => `multivers-eau-sauvegarde-${todayISO()}.json`;
@@ -2896,6 +4117,74 @@ function SettingsTab({ data, onUpdate, onRestore, onExported }) {
       )}
 
       <Card>
+        <SectionTitle icon={Plus}>Ajouter un nouvel article</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Une nouvelle marque, un nouveau carton, pack, ou même une bouteille vendue à l'unité — même une contenance que tu ne connais
+          pas encore aujourd'hui. Il démarre avec un stock vide ; réapprovisionne-le ensuite normalement depuis l'onglet Stock.
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Select
+            value={newProduct.brand}
+            onChange={(v) => setNewProduct({ ...newProduct, brand: v })}
+            options={[...brands.map((b) => ({ value: b, label: b })), { value: "__new__", label: "+ Nouvelle marque…" }]}
+            placeholder="Marque existante"
+          />
+          {newProduct.brand === "__new__" ? (
+            <Input
+              placeholder="Nom de la nouvelle marque"
+              value={newProduct.customBrand}
+              onChange={(e) => setNewProduct({ ...newProduct, customBrand: e.target.value })}
+            />
+          ) : (
+            <Input
+              placeholder="Format (ex: Carton 12x1,5L, Bouteille 1,5L)"
+              value={newProduct.format}
+              onChange={(e) => setNewProduct({ ...newProduct, format: e.target.value })}
+            />
+          )}
+        </div>
+        {newProduct.brand === "__new__" && (
+          <Input
+            placeholder="Format (ex: Carton 12x1,5L, Bouteille 1,5L)"
+            value={newProduct.format}
+            onChange={(e) => setNewProduct({ ...newProduct, format: e.target.value })}
+            className="mb-2"
+          />
+        )}
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input
+            type="number"
+            placeholder="Unités par colis (1 si bouteille seule)"
+            value={newProduct.units}
+            onChange={(e) => setNewProduct({ ...newProduct, units: e.target.value })}
+          />
+          <Input
+            type="number"
+            placeholder="Prix d'achat"
+            value={newProduct.purchase}
+            onChange={(e) => setNewProduct({ ...newProduct, purchase: e.target.value })}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input
+            type="number"
+            placeholder="Prix vente gros"
+            value={newProduct.sellPrice}
+            onChange={(e) => setNewProduct({ ...newProduct, sellPrice: e.target.value })}
+          />
+          <Input
+            type="number"
+            placeholder="Prix vente détail (/u)"
+            value={newProduct.retailPrice}
+            onChange={(e) => setNewProduct({ ...newProduct, retailPrice: e.target.value })}
+          />
+        </div>
+        <Btn onClick={submitNewProduct} className="w-full">
+          <Plus size={16} /> Ajouter au catalogue
+        </Btn>
+      </Card>
+
+      <Card>
         <SectionTitle icon={Settings}>Prix par article</SectionTitle>
         <p className="text-xs text-slate-500">
           Ces prix ne sont que des <b>valeurs par défaut</b> — modifiables librement au moment de chaque vente. Le "prix d'achat de
@@ -2904,7 +4193,7 @@ function SettingsTab({ data, onUpdate, onRestore, onExported }) {
         </p>
       </Card>
       {brands.map((b) => {
-        const c = BRAND_COLOR[b];
+        const c = getBrandColor(b);
         const rows = data.products.filter((p) => p.brand === b);
         return (
           <Card key={b}>
