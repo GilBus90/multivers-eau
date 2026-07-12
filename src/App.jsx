@@ -2164,8 +2164,9 @@ function Dashboard({ data, totals, productsById }) {
   const fmtShort = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
   const reportLabel = reportStart === reportEnd ? fmtShort(reportStart) : `du ${fmtShort(reportStart)} au ${fmtShort(reportEnd)}`;
 
-  const waterQuote = useMemo(() => getQuote("Eau", new Date()), []);
-  const recyclingQuote = useMemo(() => getQuote("Recyclage", new Date()), []);
+  const [quoteDate, setQuoteDate] = useState(todayISO());
+  const waterQuote = useMemo(() => getQuote("Eau", new Date(quoteDate + "T00:00:00")), [quoteDate]);
+  const recyclingQuote = useMemo(() => getQuote("Recyclage", new Date(quoteDate + "T00:00:00")), [quoteDate]);
 
   return (
     <div className="space-y-3">
@@ -2181,6 +2182,11 @@ function Dashboard({ data, totals, productsById }) {
       <Card>
         <SectionTitle icon={Droplet}>Citations du jour</SectionTitle>
         <div className="space-y-3">
+          <DateNav value={quoteDate} onChange={setQuoteDate} />
+          <p className="text-xs text-slate-400 text-center -mt-1">
+            {new Date(quoteDate + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            {quoteDate !== todayISO() && " (le cycle se répète chaque année)"}
+          </p>
           <div className="bg-sky-50 rounded-xl p-3">
             <p className="text-sm text-slate-700 italic">"{waterQuote.text}"</p>
             <p className="text-xs text-slate-500 mt-1">— {waterQuote.author}</p>
