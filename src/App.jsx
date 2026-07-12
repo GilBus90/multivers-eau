@@ -3,7 +3,7 @@ import {
   Droplet, ShoppingCart, Users, Wallet, Package, PiggyBank, Settings,
   LayoutDashboard, Plus, X, Check, AlertCircle, TrendingUp, TrendingDown,
   Boxes, HandCoins, Scissors, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight,
-  Calendar, Trash2
+  Calendar, Trash2, Receipt, Printer
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -41,6 +41,25 @@ const INITIAL_STOCK = {
   CRISTAL: [10, 54, 10, 10, 10, 10],
   "EAU VITALE": [6, 7, 6],
 };
+
+// TPU (Taxe Professionnelle Unique) — régime applicable à un exploitant
+// individuel dont le CA annuel ne dépasse pas 60 M FCFA. Remplace l'IMF,
+// l'IRPP, la patente et la TVA pour ce niveau d'activité. Taux "commerce"
+// (2,5%) puisque c'est de la revente d'eau embouteillée, pas un service.
+// Montant plancher légal : 20 000 F/an, quel que soit le CA réalisé.
+const TPU_RATE = 0.025;
+const TPU_MINIMUM = 20000;
+
+const EXPENSE_CATEGORIES = [
+  "Transport",
+  "Communication (crédit/internet)",
+  "Électricité / Eau",
+  "Loyer",
+  "Salaires / main d'œuvre",
+  "Entretien matériel",
+  "Taxes / impôts",
+  "Autre",
+];
 
 const BRAND_COLOR = {
   VOLTIC: { dot: "bg-sky-500", text: "text-sky-700", bg: "bg-sky-50", ring: "ring-sky-200" },
@@ -158,6 +177,7 @@ function defaultData() {
     liabilities: [],
     withdrawals: [],
     personalNotes: [],
+    expenses: [],
   };
 }
 
@@ -166,6 +186,7 @@ function defaultData() {
 function migrate(d) {
   if (!d.withdrawals) d = { ...d, withdrawals: [] };
   if (!d.personalNotes) d = { ...d, personalNotes: [] };
+  if (!d.expenses) d = { ...d, expenses: [] };
   if (d.loans && d.loans.some((l) => !l.repayments)) {
     d = {
       ...d,
@@ -686,6 +707,21 @@ export default function App({ uid: currentUid, onSignOut }) {
     persist({ ...data, personalNotes: data.personalNotes.filter((n) => n.id !== id) });
   };
 
+  // Dépenses de l'entreprise : une charge payée immédiatement sort de la
+  // trésorerie tout de suite (ce n'est PAS un passif — un passif, c'est une
+  // dette qu'on doit encore payer). Si une dépense n'est pas encore payée,
+  // c'est là qu'un vrai passif entre en jeu (onglet Bilan).
+  const addExpense = (e) => {
+    const next = { ...data, expenses: [{ id: uid(), ...e }, ...data.expenses] };
+    persist(next);
+    showToast("Dépense enregistrée");
+  };
+
+  const deleteExpense = (id) => {
+    persist({ ...data, expenses: data.expenses.filter((e) => e.id !== id) });
+    showToast("Dépense supprimée");
+  };
+
   const updateProduct = (id, patch) => {
     persist({ ...data, products: data.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
   };
@@ -722,13 +758,20 @@ export default function App({ uid: currentUid, onSignOut }) {
     { key: "clients", label: "Clients", icon: Users },
     { key: "loans", label: "Prêts", icon: HandCoins },
     { key: "stock", label: "Stock", icon: Boxes },
+    { key: "expenses", label: "Dépenses", icon: Receipt },
     { key: "balance", label: "Bilan", icon: PiggyBank },
     { key: "settings", label: "Produits", icon: Settings },
   ];
 
   return (
     <div className="min-h-screen bg-teal-50 text-slate-800 pb-28 font-sans">
-      <header className="sticky top-0 z-20 bg-teal-800 text-white px-4 py-3 flex items-center gap-2 shadow-sm">
+      <style>{`
+        @media print {
+          .no-print, header, nav, input, select, button, textarea { display: none !important; }
+          body { background: white !important; }
+        }
+      `}</style>
+      <header className="no-print sticky top-0 z-20 bg-teal-800 text-white px-4 py-3 flex items-center gap-2 shadow-sm">
         <span className="flex items-center justify-center w-8 h-8 rounded-full bg-white shrink-0">
           <Droplet size={18} className="text-blue-700" fill="currentColor" fillOpacity={0.15} />
         </span>
@@ -743,14 +786,14 @@ export default function App({ uid: currentUid, onSignOut }) {
           <div className="font-mono font-bold text-sm tabular-nums">{fcfa(totals.treasury)}</div>
         </div>
         {onSignOut && (
-          <button onClick={onSignOut} className="ml-2 text-cyan-100 text-xs underline shrink-0">
+          <button onClick={onSignOut} className="no-print ml-2 text-cyan-100 text-xs underline shrink-0">
             Déconnexion
           </button>
         )}
       </header>
 
       {saveError && (
-        <div className="bg-rose-600 text-white px-4 py-2 flex items-center justify-between gap-3 text-xs">
+        <div className="no-print bg-rose-600 text-white px-4 py-2 flex items-center justify-between gap-3 text-xs">
           <span className="flex items-center gap-1.5">
             <AlertCircle size={14} className="shrink-0" />
             Dernières modifications pas encore enregistrées.
@@ -772,6 +815,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         {tab === "clients" && <ClientsTab data={data} totals={totals} onPaySale={(id, a) => recordPayment("sales", id, a)} onPayDetail={(id, a) => recordPayment("detailSales", id, a)} />}
         {tab === "loans" && <LoansTab data={data} onAdd={addLoan} onRepay={repayLoan} onDelete={deleteLoan} onDeleteRepayment={deleteRepayment} />}
         {tab === "stock" && <StockTab data={data} productsById={productsById} totals={totals} onRestock={addRestock} onDeleteRestock={deleteRestock} />}
+        {tab === "expenses" && <ExpensesTab data={data} totals={totals} onAdd={addExpense} onDelete={deleteExpense} />}
         {tab === "balance" && (
           <BalanceTab
             data={data}
@@ -809,7 +853,7 @@ export default function App({ uid: currentUid, onSignOut }) {
 
       {toast && (
         <div
-          className={`fixed bottom-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-full text-sm shadow-lg text-white ${
+          className={`no-print fixed bottom-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-full text-sm shadow-lg text-white ${
             toast.kind === "error" ? "bg-rose-600" : "bg-teal-700"
           }`}
         >
@@ -834,8 +878,9 @@ function computeTotals(data) {
   const loanedOut = data.loans.filter((x) => !x.isOpening).reduce((s, x) => s + x.amount, 0);
   const loanRepaid = data.loans.reduce((s, x) => s + repaidAmount(x), 0);
   const withdrawalsTotal = (data.withdrawals || []).reduce((s, x) => s + x.amount, 0);
+  const expensesTotal = (data.expenses || []).reduce((s, x) => s + x.amount, 0);
 
-  const treasury = data.meta.initialCash + paidSales + paidDetail - restockCost - loanedOut + loanRepaid - withdrawalsTotal;
+  const treasury = data.meta.initialCash + paidSales + paidDetail - restockCost - loanedOut + loanRepaid - withdrawalsTotal - expensesTotal;
 
   const receivables =
     data.sales.reduce((s, x) => s + Math.max(0, x.qty * x.unitPrice - x.paidAmount), 0) +
@@ -852,11 +897,6 @@ function computeTotals(data) {
   const stockValue = stockValueGros + stockValueDetail;
 
   const liabilitiesTotal = data.liabilities.reduce((s, x) => s + x.amount, 0);
-
-  const assets = treasury + stockValue + receivables + loansOutstanding;
-  const netWorth = assets - liabilitiesTotal;
-  const startingCapital = data.meta.startingCapital || 0;
-  const netResult = netWorth - startingCapital;
 
   const allOps = [
     ...data.sales.map((s) => ({ ...s, kind: "gros" })),
@@ -879,6 +919,19 @@ function computeTotals(data) {
   const todayOps = byDay(today);
   const monthOps = allOps.filter((o) => inMonth(o.date, ym));
   const yearOps = allOps.filter((o) => inYear(o.date, y));
+
+  // Provision fiscale — TPU (Taxe Professionnelle Unique), régime applicable
+  // aux personnes physiques dont le CA annuel ne dépasse pas 60 M FCFA :
+  // 2,5 % du chiffre d'affaires (commerce), avec un minimum légal de 20 000
+  // F/an. Calculée sur le CA réellement encaissé/facturé de l'année civile
+  // en cours (pas une projection) — donc elle grossit au fil de l'année.
+  const tpuBase = sumRevenue(yearOps);
+  const tpuEstimate = Math.max(TPU_MINIMUM, tpuBase * TPU_RATE);
+
+  const assets = treasury + stockValue + receivables + loansOutstanding;
+  const netWorth = assets - liabilitiesTotal - tpuEstimate;
+  const startingCapital = data.meta.startingCapital || 0;
+  const netResult = netWorth - startingCapital;
 
   // 14 derniers jours pour le graphique
   const days = [...Array(14)].map((_, i) => {
@@ -921,11 +974,13 @@ function computeTotals(data) {
     stockValueGros,
     stockValueDetail,
     liabilitiesTotal,
+    tpuEstimate,
     assets,
     netWorth,
     startingCapital,
     netResult,
     withdrawalsTotal,
+    expensesTotal,
     profitOf,
     revenueOf,
     today: { profit: sumProfit(todayOps), revenue: sumRevenue(todayOps), count: todayOps.length },
@@ -1087,6 +1142,87 @@ function Dashboard({ data, totals, productsById }) {
   const daysSinceExport = lastExport ? Math.round((Date.now() - lastExport.getTime()) / 86400000) : null;
   const exportOverdue = daysSinceExport === null || daysSinceExport > 3;
 
+  // Rapport imprimable : synthèse de toutes les rubriques (ventes, achats,
+  // dépenses, bénéfice) sur une période libre (du ... au ...), avec des
+  // raccourcis pour mois / semestre / année en cours.
+  const monthBounds = (ref) => {
+    const [y, m] = ref.slice(0, 7).split("-").map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return { start: `${ref.slice(0, 7)}-01`, end: `${ref.slice(0, 7)}-${String(last).padStart(2, "0")}` };
+  };
+  const today0 = todayISO();
+  const defaultBounds = monthBounds(today0);
+  const [reportStart, setReportStart] = useState(defaultBounds.start);
+  const [reportEnd, setReportEnd] = useState(defaultBounds.end);
+
+  const applyPreset = (key) => {
+    const y = today0.slice(0, 4);
+    const addDays = (iso, n) => {
+      const d = new Date(iso + "T00:00:00");
+      d.setDate(d.getDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    if (key === "today") {
+      setReportStart(today0);
+      setReportEnd(today0);
+    } else if (key === "week") {
+      const d = new Date(today0 + "T00:00:00");
+      const dow = d.getDay(); // 0 = dimanche
+      const diffToMonday = dow === 0 ? -6 : 1 - dow;
+      const monday = addDays(today0, diffToMonday);
+      setReportStart(monday);
+      setReportEnd(addDays(monday, 6));
+    } else if (key === "twoWeeks") {
+      setReportStart(addDays(today0, -13));
+      setReportEnd(today0);
+    } else if (key === "thisMonth") {
+      const b = monthBounds(today0);
+      setReportStart(b.start);
+      setReportEnd(b.end);
+    } else if (key === "lastMonth") {
+      const [yy, mm] = today0.slice(0, 7).split("-").map(Number);
+      const prevY = mm === 1 ? yy - 1 : yy;
+      const prevM = mm === 1 ? 12 : mm - 1;
+      const b = monthBounds(`${prevY}-${String(prevM).padStart(2, "0")}-01`);
+      setReportStart(b.start);
+      setReportEnd(b.end);
+    } else if (key === "quarter") {
+      const m = Number(today0.slice(5, 7));
+      const qStartMonth = Math.floor((m - 1) / 3) * 3 + 1; // 1, 4, 7 ou 10
+      const qEndMonth = qStartMonth + 2;
+      const b = monthBounds(`${y}-${String(qEndMonth).padStart(2, "0")}-01`);
+      setReportStart(`${y}-${String(qStartMonth).padStart(2, "0")}-01`);
+      setReportEnd(b.end);
+    } else if (key === "semester") {
+      const m = Number(today0.slice(5, 7));
+      if (m <= 6) {
+        setReportStart(`${y}-01-01`);
+        setReportEnd(`${y}-06-30`);
+      } else {
+        setReportStart(`${y}-07-01`);
+        setReportEnd(`${y}-12-31`);
+      }
+    } else if (key === "year") {
+      setReportStart(`${y}-01-01`);
+      setReportEnd(`${y}-12-31`);
+    }
+  };
+
+  const reportStats = useMemo(() => {
+    const inRange = (d) => d >= reportStart && d <= reportEnd;
+    const ops = totals.allOps.filter((o) => inRange(o.date));
+    const expenses = (data.expenses || []).filter((e) => inRange(e.date));
+    const restocks = (data.restocks || []).filter((r) => inRange(r.date));
+    const ventesCA = ops.reduce((s, o) => s + totals.revenueOf(o), 0);
+    const benefice = ops.reduce((s, o) => s + totals.profitOf(o), 0);
+    const depenses = expenses.reduce((s, e) => s + e.amount, 0);
+    const achats = restocks.reduce((s, r) => s + r.qty * r.unitCost, 0);
+    return { count: ops.length, ventesCA, benefice, depenses, achats, resultat: benefice - depenses };
+  }, [totals.allOps, data.expenses, data.restocks, reportStart, reportEnd, totals]);
+
+  const fmtShort = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  const reportLabel = reportStart === reportEnd ? fmtShort(reportStart) : `du ${fmtShort(reportStart)} au ${fmtShort(reportEnd)}`;
+
   return (
     <div className="space-y-3">
       {exportOverdue && (
@@ -1135,6 +1271,64 @@ function Dashboard({ data, totals, productsById }) {
       </Card>
 
       <Card>
+        <div className="flex items-center justify-between mb-2">
+          <SectionTitle icon={Printer}>Rapport — toutes rubriques</SectionTitle>
+        </div>
+        <div className="flex gap-1.5 mb-2 flex-wrap">
+          {[
+            { key: "today", label: "Quotidien" },
+            { key: "week", label: "Hebdomadaire" },
+            { key: "twoWeeks", label: "Bihebdomadaire" },
+            { key: "lastMonth", label: "Mois dernier" },
+            { key: "thisMonth", label: "Ce mois" },
+            { key: "quarter", label: "Trimestriel" },
+            { key: "semester", label: "Semestre" },
+            { key: "year", label: "Année" },
+          ].map((g) => (
+            <button
+              key={g.key}
+              onClick={() => applyPreset(g.key)}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-500"
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div>
+            <label className="text-xs text-slate-400">Du</label>
+            <Input type="date" value={reportStart} onChange={(e) => setReportStart(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400">Au</label>
+            <Input type="date" value={reportEnd} onChange={(e) => setReportEnd(e.target.value)} />
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 mb-2">{reportLabel} — {reportStats.count} vente(s)</p>
+        <Row label="Ventes (CA)" value={fcfa(reportStats.ventesCA)} />
+        <Row label="Achats (réappro)" value={fcfa(reportStats.achats)} />
+        <Row label="Dépenses" value={fcfa(reportStats.depenses)} />
+        <Row label="Bénéfice brut" value={fcfa(reportStats.benefice)} />
+        <Row
+          label="Résultat (bénéfice − dépenses)"
+          value={fcfa(reportStats.resultat)}
+          bold
+          tone={reportStats.resultat >= 0 ? "teal" : "rose"}
+        />
+        <PrintOrCopy
+          className="mt-2"
+          getText={() =>
+            `Rapport Multivers'Eau — ${reportLabel}\n` +
+            `Ventes (CA) : ${fcfa(reportStats.ventesCA)}\n` +
+            `Achats (réappro) : ${fcfa(reportStats.achats)}\n` +
+            `Dépenses : ${fcfa(reportStats.depenses)}\n` +
+            `Bénéfice brut : ${fcfa(reportStats.benefice)}\n` +
+            `Résultat : ${fcfa(reportStats.resultat)}`
+          }
+        />
+      </Card>
+
+      <Card>
         <SectionTitle icon={TrendingUp}>Bénéfice — 14 derniers jours</SectionTitle>
         <div style={{ width: "100%", height: 160 }}>
           <ResponsiveContainer>
@@ -1178,6 +1372,7 @@ function Dashboard({ data, totals, productsById }) {
         <StatCard label="— dont détail (capital immobilisé)" value={fcfa(totals.stockValueDetail)} tone="slate" />
         <StatCard label="Créances clients" value={fcfa(totals.receivables)} tone="amber" />
         <StatCard label="Prêts en cours" value={fcfa(totals.loansOutstanding)} tone="amber" />
+        <StatCard label="TPU à provisionner (année en cours)" value={fcfa(totals.tpuEstimate)} tone="amber" />
       </div>
 
       <Card>
@@ -1698,6 +1893,12 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
 
   return (
     <div className="space-y-3">
+      <PrintOrCopy
+        getText={() =>
+          `Créances clients — Multivers'Eau\nTotal dû : ${fcfa(totalDebt)}\n\n` +
+          debts.map((d) => `${d.client} : ${fcfa(d.total)}`).join("\n")
+        }
+      />
       <StatCard label="Total des créances clients" value={fcfa(totalDebt)} tone="amber" />
       {debts.length === 0 && (
         <Card>
@@ -1816,6 +2017,60 @@ function ConfirmDeleteButton({ onConfirm, label = "Supprimer cette ligne ?", siz
         </Modal>
       )}
     </>
+  );
+}
+
+// Certains navigateurs mobiles (webviews intégrées, certains Android) ne
+// déclenchent aucune boîte d'impression avec window.print() sans le
+// signaler. On tente quand même, mais on propose toujours en plus une copie
+// texte garantie (à coller dans WhatsApp, Notes, etc.), qui elle fonctionne
+// partout.
+function PrintOrCopy({ getText, className = "" }) {
+  const [status, setStatus] = useState(null); // "printing" | "copied" | "error"
+
+  const tryPrint = () => {
+    if (typeof window.print !== "function") {
+      setStatus("unsupported");
+      setTimeout(() => setStatus(null), 3500);
+      return;
+    }
+    try {
+      window.print();
+    } catch (e) {
+      setStatus("unsupported");
+      setTimeout(() => setStatus(null), 3500);
+    }
+  };
+
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(getText());
+      setStatus("copied");
+    } catch (e) {
+      setStatus("error");
+    }
+    setTimeout(() => setStatus(null), 2500);
+  };
+
+  return (
+    <div className={className}>
+      <div className="grid grid-cols-2 gap-2">
+        <Btn kind="ghost" onClick={tryPrint}>
+          <Printer size={14} /> Imprimer
+        </Btn>
+        <Btn kind="ghost" onClick={copyText}>
+          <Check size={14} /> Copier
+        </Btn>
+      </div>
+      {status === "copied" && <p className="text-xs text-teal-700 mt-1">Copié ! Colle-le dans WhatsApp, Notes, etc.</p>}
+      {status === "unsupported" && (
+        <p className="text-xs text-amber-600 mt-1">
+          L'impression ne répond pas sur ce navigateur — utilise "Copier" à la place, ou réessaie depuis Chrome/Brave (pas depuis une
+          app intégrée).
+        </p>
+      )}
+      {status === "error" && <p className="text-xs text-rose-600 mt-1">Copie impossible ici — réessaie depuis Chrome ou Brave.</p>}
+    </div>
   );
 }
 
@@ -1985,6 +2240,13 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
 
   return (
     <div className="space-y-3">
+      <PrintOrCopy
+        getText={() =>
+          `Stock — Multivers'Eau\nColis (gros) : ${grandGros}\nUnités (détail) : ${grandDetail}\nValeur totale : ${fcfa(
+            totals.stockValue
+          )}`
+        }
+      />
       <Card>
         <SectionTitle icon={Boxes}>Total général — toutes marques</SectionTitle>
         <div className="grid grid-cols-3 gap-2">
@@ -2152,6 +2414,83 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
 
 /* --------------------------------- Bilan ------------------------------------ */
 
+/* -------------------------------- Dépenses --------------------------------- */
+
+function ExpensesTab({ data, totals, onAdd, onDelete }) {
+  const [form, setForm] = useState({ date: todayISO(), category: EXPENSE_CATEGORIES[0], label: "", amount: "" });
+
+  const submit = () => {
+    if (!form.amount) return;
+    onAdd({ ...form, amount: Number(form.amount) });
+    setForm({ date: todayISO(), category: EXPENSE_CATEGORIES[0], label: "", amount: "" });
+  };
+
+  const monthTotal = data.expenses
+    .filter((e) => e.date.slice(0, 7) === todayISO().slice(0, 7))
+    .reduce((s, e) => s + e.amount, 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard label="Dépenses ce mois-ci" value={fcfa(monthTotal)} tone="amber" />
+        <StatCard label="Total cumulé" value={fcfa(totals.expensesTotal)} tone="amber" />
+      </div>
+      <PrintOrCopy
+        getText={() =>
+          `Dépenses — Multivers'Eau\nCe mois-ci : ${fcfa(monthTotal)}\nTotal cumulé : ${fcfa(totals.expensesTotal)}\n\n` +
+          data.expenses.map((e) => `${e.date} — ${e.category}${e.label ? " (" + e.label + ")" : ""} : ${fcfa(e.amount)}`).join("\n")
+        }
+      />
+
+      <Card>
+        <SectionTitle icon={Receipt}>Nouvelle dépense</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Une dépense payée tout de suite sort directement de la trésorerie — ce n'est pas un passif. Si elle n'est pas encore payée,
+          déclare-la plutôt comme "Passif" dans l'onglet Bilan, puis enregistre-la ici seulement le jour où tu la payes réellement.
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <Select
+            value={form.category}
+            onChange={(v) => setForm({ ...form, category: v })}
+            options={EXPENSE_CATEGORIES.map((c) => ({ value: c, label: c }))}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input placeholder="Détail (optionnel)" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
+          <Input type="number" placeholder="Montant" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+        </div>
+        <Btn onClick={submit} className="w-full">
+          <Plus size={16} /> Enregistrer la dépense
+        </Btn>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Receipt}>Historique des dépenses</SectionTitle>
+        {data.expenses.length === 0 && <p className="text-sm text-slate-400">Aucune dépense enregistrée.</p>}
+        <ul className="divide-y divide-slate-100">
+          {data.expenses.map((e) => (
+            <li key={e.id} className="py-2 text-sm">
+              <div className="flex justify-between items-start gap-2">
+                <span className="font-medium">
+                  {e.category}
+                  {e.label ? <span className="text-slate-400 font-normal"> — {e.label}</span> : null}
+                </span>
+                <span className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-slate-400">{new Date(e.date).toLocaleDateString("fr-FR")}</span>
+                  <ConfirmDeleteButton onConfirm={() => onDelete(e.id)} label={`Supprimer cette dépense (${e.category}, ${fcfa(e.amount)}) ?`} />
+                </span>
+              </div>
+              <div className="text-xs font-mono text-slate-600 mt-0.5">{fcfa(e.amount)}</div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+
 function BalanceTab({
   data,
   totals,
@@ -2190,6 +2529,16 @@ function BalanceTab({
 
   return (
     <div className="space-y-3">
+      <PrintOrCopy
+        getText={() =>
+          `Bilan — Multivers'Eau\n` +
+          `Total actifs : ${fcfa(totals.assets)}\n` +
+          `Total passifs : ${fcfa(totals.liabilitiesTotal)}\n` +
+          `Valeur nette : ${fcfa(totals.netWorth)}\n` +
+          `Objectif (dette investisseur) : ${fcfa(totals.startingCapital)}\n` +
+          `${totals.netResult >= 0 ? "Excédent" : "Reste à générer"} : ${fcfa(Math.abs(totals.netResult))}`
+        }
+      />
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Total actifs" value={fcfa(totals.assets)} />
         <StatCard
@@ -2275,6 +2624,23 @@ function BalanceTab({
       </Card>
 
       <Card>
+        <SectionTitle icon={Receipt}>Provision fiscale — TPU estimée</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          En tant qu'exploitant individuel (CA ≤ 60 M FCFA), c'est la <b>Taxe Professionnelle Unique</b> qui s'applique — pas l'IMF.
+          Elle remplace l'IRPP, l'IMF, la patente et la TVA à ce niveau d'activité : 2,5 % du chiffre d'affaires (commerce), avec un
+          minimum légal de 20 000 F/an. Calculée ici sur le CA réel de l'année civile en cours, donc elle grossit au fil de l'année —
+          c'est une estimation pour t'aider à mettre de côté, à confirmer auprès de l'OTR une fois enregistré.
+        </p>
+        <Row label="CA de l'année en cours" value={fcfa(totals.year.revenue)} />
+        <Row label="Taux appliqué" value="2,5 %" />
+        <Row label="TPU estimée à provisionner" value={fcfa(totals.tpuEstimate)} bold tone="amber" />
+        <p className="text-xs text-slate-400 mt-2">
+          Ce montant est déjà déduit de ta "Valeur nette" ci-dessus, comme une dette à venir envers l'État — même s'il n'a pas encore
+          été réellement payé.
+        </p>
+      </Card>
+
+      <Card>
         <SectionTitle icon={AlertCircle}>Passifs (dettes de l'entreprise)</SectionTitle>
         {data.liabilities.length === 0 && <p className="text-sm text-slate-400 mb-2">Aucun passif déclaré.</p>}
         <ul className="divide-y divide-slate-100 mb-2">
@@ -2300,6 +2666,7 @@ function BalanceTab({
       <Card>
         <Row label="Total actifs" value={fcfa(totals.assets)} />
         <Row label="Total passifs" value={fcfa(totals.liabilitiesTotal)} />
+        <Row label="Provision TPU" value={fcfa(totals.tpuEstimate)} />
         <Row label="Valeur nette (capital)" value={fcfa(totals.netWorth)} bold tone={totals.netWorth >= 0 ? "teal" : "rose"} />
       </Card>
 
