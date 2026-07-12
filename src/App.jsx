@@ -2025,10 +2025,10 @@ function DateNav({ value, onChange }) {
   const isToday = value === todayISO();
   return (
     <div className="flex items-center gap-1">
-      <button onClick={() => shift(-7)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500" title="-7 jours">
+      <button type="button" onClick={() => shift(-7)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="-7 jours">
         <ChevronsLeft size={15} />
       </button>
-      <button onClick={() => shift(-1)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500" title="Jour précédent">
+      <button type="button" onClick={() => shift(-1)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="Jour précédent">
         <ChevronLeft size={15} />
       </button>
       <div className="relative flex-1">
@@ -2039,14 +2039,14 @@ function DateNav({ value, onChange }) {
           className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-center focus:outline-none focus:ring-2 focus:ring-teal-300"
         />
       </div>
-      <button onClick={() => shift(1)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500" title="Jour suivant">
+      <button type="button" onClick={() => shift(1)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="Jour suivant">
         <ChevronRight size={15} />
       </button>
-      <button onClick={() => shift(7)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500" title="+7 jours">
+      <button type="button" onClick={() => shift(7)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="+7 jours">
         <ChevronsRight size={15} />
       </button>
       {!isToday && (
-        <button onClick={() => onChange(todayISO())} className="px-2 py-1.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-semibold whitespace-nowrap">
+        <button type="button" onClick={() => onChange(todayISO())} className="px-2 py-1.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-semibold whitespace-nowrap">
           Aujourd'hui
         </button>
       )}
