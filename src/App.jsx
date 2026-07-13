@@ -752,8 +752,8 @@ const QR = [
 ];
 
 function getDayOfYear(d) {
-  const s = new Date(d.getFullYear(), 0, 0);
-  return Math.floor((d - s) / 86400000);
+  const s = Date.UTC(d.getUTCFullYear(), 0, 0);
+  return Math.floor((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - s) / 86400000);
 }
 function getQuote(cat, date) {
   const idx = (getDayOfYear(date) - 1 + 730) % 365;
@@ -902,14 +902,14 @@ function buildDefaultProducts() {
   });
 }
 
-// Formate une date en "aaaa-mm-jj" à partir de ses composantes LOCALES —
-// contrairement à toISOString() (qui convertit en UTC et peut donc décaler
-// la date d'un jour selon le fuseau horaire réglé sur l'ordinateur), ceci
-// donne toujours la date telle qu'affichée sur l'appareil de l'utilisateur.
+// Formate une date en "aaaa-mm-jj" en heure de Lomé (UTC+0, sans heure
+// d'été) — volontairement FIXE, indépendante du fuseau horaire réglé sur
+// l'appareil de l'utilisateur (ordinateur en heure de France, téléphone en
+// heure du Togo, etc.). Sans ça, "aujourd'hui" changeait selon l'appareil.
 function localISO(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
@@ -1705,7 +1705,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         <div className="leading-tight">
           <div className="font-bold tracking-tight text-sm">Multivers'Eau — Suivi</div>
           <div className="text-xs text-cyan-100">
-            Depuis le {new Date(data.meta.startDate).toLocaleDateString("fr-FR")}
+            Depuis le {new Date(data.meta.startDate).toLocaleDateString("fr-FR", { timeZone: "UTC" })}
           </div>
         </div>
         <div className="ml-auto text-right">
@@ -1891,7 +1891,7 @@ function computeTotals(data) {
   // 14 derniers jours pour le graphique
   const days = [...Array(14)].map((_, i) => {
     const d = new Date();
-    d.setDate(d.getDate() - (13 - i));
+    d.setUTCDate(d.getUTCDate() - (13 - i));
     return localISO(d);
   });
   const chartData = days.map((d) => ({
@@ -1904,8 +1904,8 @@ function computeTotals(data) {
   // mois) vs ventes (CA) vs bénéfice. Ainsi : ventes - coût d'achat = bénéfice.
   const months = [...Array(12)].map((_, i) => {
     const d = new Date();
-    d.setDate(1);
-    d.setMonth(d.getMonth() - (11 - i));
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - (11 - i));
     return localISO(d).slice(0, 7);
   });
   const costOf = (o) => o.qty * o.unitCost;
@@ -1914,7 +1914,7 @@ function computeTotals(data) {
     const coutAchat = opsInMonth.reduce((s, o) => s + costOf(o), 0);
     return {
       month: m,
-      label: new Date(m + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }),
+      label: new Date(m + "-01T00:00:00Z").toLocaleDateString("fr-FR", { month: "short", year: "2-digit", timeZone: "UTC" }),
       achats: coutAchat,
       ventes: sumRevenue(opsInMonth),
       benefice: sumProfit(opsInMonth),
@@ -2050,8 +2050,8 @@ function DateNav({ value, onChange }) {
     if (document.activeElement && document.activeElement.tagName === "INPUT") {
       document.activeElement.blur();
     }
-    const d = new Date(value + "T00:00:00");
-    d.setDate(d.getDate() + days);
+    const d = new Date(value + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
     onChange(localISO(d));
   };
   const isToday = value === todayISO();
@@ -2143,7 +2143,7 @@ function Dashboard({ data, totals, productsById }) {
   // raccourcis pour mois / semestre / année en cours.
   const monthBounds = (ref) => {
     const [y, m] = ref.slice(0, 7).split("-").map(Number);
-    const last = new Date(y, m, 0).getDate();
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
     return { start: `${ref.slice(0, 7)}-01`, end: `${ref.slice(0, 7)}-${String(last).padStart(2, "0")}` };
   };
   const today0 = todayISO();
@@ -2154,16 +2154,16 @@ function Dashboard({ data, totals, productsById }) {
   const applyPreset = (key) => {
     const y = today0.slice(0, 4);
     const addDays = (iso, n) => {
-      const d = new Date(iso + "T00:00:00");
-      d.setDate(d.getDate() + n);
+      const d = new Date(iso + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + n);
       return localISO(d);
     };
     if (key === "today") {
       setReportStart(today0);
       setReportEnd(today0);
     } else if (key === "week") {
-      const d = new Date(today0 + "T00:00:00");
-      const dow = d.getDay(); // 0 = dimanche
+      const d = new Date(today0 + "T00:00:00Z");
+      const dow = d.getUTCDay(); // 0 = dimanche
       const diffToMonday = dow === 0 ? -6 : 1 - dow;
       const monday = addDays(today0, diffToMonday);
       setReportStart(monday);
@@ -2218,12 +2218,12 @@ function Dashboard({ data, totals, productsById }) {
     return { count: ops.length, ventesCA, benefice, depenses, achats, recyclage, resultat: benefice + recyclage - depenses };
   }, [totals.allOps, data.expenses, data.restocks, data.recyclingSales, reportStart, reportEnd, totals]);
 
-  const fmtShort = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  const fmtShort = (iso) => new Date(iso + "T00:00:00Z").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const reportLabel = reportStart === reportEnd ? fmtShort(reportStart) : `du ${fmtShort(reportStart)} au ${fmtShort(reportEnd)}`;
 
   const [quoteDate, setQuoteDate] = useState(todayISO());
-  const waterQuote = useMemo(() => getQuote("Eau", new Date(quoteDate + "T00:00:00")), [quoteDate]);
-  const recyclingQuote = useMemo(() => getQuote("Recyclage", new Date(quoteDate + "T00:00:00")), [quoteDate]);
+  const waterQuote = useMemo(() => getQuote("Eau", new Date(quoteDate + "T00:00:00Z")), [quoteDate]);
+  const recyclingQuote = useMemo(() => getQuote("Recyclage", new Date(quoteDate + "T00:00:00Z")), [quoteDate]);
 
   return (
     <div className="space-y-3">
@@ -2241,7 +2241,7 @@ function Dashboard({ data, totals, productsById }) {
         <div className="space-y-3">
           <DateNav value={quoteDate} onChange={setQuoteDate} />
           <p className="text-xs text-slate-400 text-center -mt-1">
-            {new Date(quoteDate + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            {new Date(quoteDate + "T00:00:00Z").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}
             {quoteDate !== todayISO() && " (le cycle se répète chaque année)"}
           </p>
           <div className="bg-sky-50 rounded-xl p-3">
@@ -2271,7 +2271,7 @@ function Dashboard({ data, totals, productsById }) {
         <DateNav value={journalDate} onChange={setJournalDate} />
         <div className="flex justify-between mt-3 mb-1 text-xs">
           <span className="text-slate-500">
-            {new Date(journalDate + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            {new Date(journalDate + "T00:00:00Z").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}
           </span>
           <span className="font-mono">
             CA {fcfa(journalRevenue)} • Bénéfice <b className="text-teal-700">{fcfa(journalProfit)}</b>
@@ -2650,7 +2650,7 @@ function SalesTab({ data, productsById, onAdd, onBatchAdd, onDelete }) {
                 <div className="flex justify-between items-start gap-2">
                   <span className="font-medium">{s.client}</span>
                   <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-slate-400 text-xs">{new Date(s.date).toLocaleDateString("fr-FR")}</span>
+                    <span className="text-slate-400 text-xs">{new Date(s.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</span>
                     <ConfirmDeleteButton
                       onConfirm={() => onDelete(s.id)}
                       label={`Supprimer cette vente (${p?.brand} ${p?.format} × ${s.qty}) ? Le stock sera restitué.`}
@@ -2747,7 +2747,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
                 <span className="font-medium text-slate-700">
                   {o.product.brand} {o.product.format} — Lot #{o.lotNo}
                 </span>
-                <span className="text-slate-400">{new Date(o.date).toLocaleDateString("fr-FR")}</span>
+                <span className="text-slate-400">{new Date(o.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -2831,7 +2831,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
                 <div className="flex justify-between items-start gap-2">
                   <span className="font-medium">{s.client}</span>
                   <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-slate-400 text-xs">{new Date(s.date).toLocaleDateString("fr-FR")}</span>
+                    <span className="text-slate-400 text-xs">{new Date(s.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</span>
                     <ConfirmDeleteButton
                       onConfirm={() => onDeleteSale(s.id)}
                       label={`Supprimer cette vente détail (${p?.brand} ${p?.format} × ${s.qty}) ? Le stock détail sera restitué.`}
@@ -2863,7 +2863,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
             return (
               <li key={o.id} className="py-1.5 flex items-center justify-between text-xs">
                 <span className="text-slate-600">
-                  {new Date(o.date).toLocaleDateString("fr-FR")} — {p?.brand} {p?.format} ouvert (+{p?.units} u.)
+                  {new Date(o.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {p?.brand} {p?.format} ouvert (+{p?.units} u.)
                 </span>
                 <ConfirmDeleteButton
                   onConfirm={() => onDeleteOpening(o.id)}
@@ -2955,7 +2955,7 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
             {d.items.map((it) => (
               <li key={it.id} className="py-1.5 flex items-center justify-between text-xs">
                 <span className="text-slate-500">
-                  {new Date(it.date).toLocaleDateString("fr-FR")} — {it.kind === "sales" ? "Gros" : "Détail"} — dû {fcfa(it.due)}
+                  {new Date(it.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {it.kind === "sales" ? "Gros" : "Détail"} — dû {fcfa(it.due)}
                 </span>
                 <button
                   className="text-teal-700 font-semibold flex items-center gap-0.5"
@@ -2983,7 +2983,7 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-xs text-slate-500">{new Date(c.lastDate).toLocaleDateString("fr-FR")}</div>
+                <div className="text-xs text-slate-500">{new Date(c.lastDate).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</div>
                 <div
                   className={`text-xs font-semibold ${
                     c.daysSince > 60 ? "text-rose-600" : c.daysSince > 30 ? "text-amber-600" : "text-teal-700"
@@ -3215,7 +3215,7 @@ function LoansTab({ data, onAdd, onRepay, onDelete, onDeleteRepayment }) {
                     )}
                   </span>
                   <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-slate-400">{new Date(l.date).toLocaleDateString("fr-FR")}</span>
+                    <span className="text-xs text-slate-400">{new Date(l.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</span>
                     <ConfirmDeleteButton onConfirm={() => onDelete(l.id)} label={`Supprimer ce prêt à ${l.beneficiary} (${fcfa(l.amount)}) ?`} />
                   </span>
                 </div>
@@ -3247,7 +3247,7 @@ function LoansTab({ data, onAdd, onRepay, onDelete, onDeleteRepayment }) {
                     <div className="text-xs text-slate-400 uppercase mb-1">Remboursements enregistrés</div>
                     {repayments.map((r) => (
                       <div key={r.id} className="flex items-center justify-between text-xs py-0.5">
-                        <span>{new Date(r.date).toLocaleDateString("fr-FR")} — {fcfa(r.amount)}</span>
+                        <span>{new Date(r.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {fcfa(r.amount)}</span>
                         <ConfirmDeleteButton
                           onConfirm={() => onDeleteRepayment(l.id, r.id)}
                           label={`Supprimer ce remboursement partiel de ${fcfa(r.amount)} ?`}
@@ -3382,7 +3382,7 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
             return (
               <li key={r.id} className="py-1.5 flex items-center justify-between text-xs">
                 <span className="text-slate-600">
-                  {new Date(r.date).toLocaleDateString("fr-FR")} — {p?.brand} {p?.format} × {r.qty} à {fcfa(r.unitCost)}
+                  {new Date(r.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {p?.brand} {p?.format} × {r.qty} à {fcfa(r.unitCost)}
                 </span>
                 <ConfirmDeleteButton
                   onConfirm={() => onDeleteRestock(r.id)}
@@ -3446,7 +3446,7 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
                                 {grosLots.length === 0 && <div className="text-slate-400 text-xs">Aucun lot.</div>}
                                 {sortLots(grosLots).map((l) => (
                                   <div key={l.id} className="flex justify-between text-xs py-0.5">
-                                    <span>Lot #{l.lotNo} — {new Date(l.date).toLocaleDateString("fr-FR")} — {l.qty} u.</span>
+                                    <span>Lot #{l.lotNo} — {new Date(l.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {l.qty} u.</span>
                                     <span className="font-mono">{fcfa(l.unitCost)}/u</span>
                                   </div>
                                 ))}
@@ -3456,7 +3456,7 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
                                 {detailLots.length === 0 && <div className="text-slate-400 text-xs">Aucun lot.</div>}
                                 {sortLots(detailLots).map((l) => (
                                   <div key={l.id} className="flex justify-between text-xs py-0.5">
-                                    <span>Lot #{l.lotNo} — {new Date(l.date).toLocaleDateString("fr-FR")} — {l.qty} u.</span>
+                                    <span>Lot #{l.lotNo} — {new Date(l.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {l.qty} u.</span>
                                     <span className="font-mono">{fcfa(l.unitCost)}/u</span>
                                   </div>
                                 ))}
@@ -3551,7 +3551,7 @@ function ExpensesTab({ data, totals, onAdd, onDelete }) {
                   {e.label ? <span className="text-slate-400 font-normal"> — {e.label}</span> : null}
                 </span>
                 <span className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs text-slate-400">{new Date(e.date).toLocaleDateString("fr-FR")}</span>
+                  <span className="text-xs text-slate-400">{new Date(e.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</span>
                   <ConfirmDeleteButton onConfirm={() => onDelete(e.id)} label={`Supprimer cette dépense (${e.category}, ${fcfa(e.amount)}) ?`} />
                 </span>
               </div>
@@ -3738,7 +3738,7 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
           {data.recyclingCollections.map((c) => (
             <li key={c.id} className="py-1.5 flex items-center justify-between text-xs">
               <span className="text-slate-600">
-                {new Date(c.date).toLocaleDateString("fr-FR")} — {productLabel(c.productId)} — {c.client || "Client anonyme"} :{" "}
+                {new Date(c.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {productLabel(c.productId)} — {c.client || "Client anonyme"} :{" "}
                 {c.quantity} bouteille(s)
                 {c.unitCost > 0 ? ` — payé ${fcfa(c.quantity * c.unitCost)}` : " (gratuit)"}
                 {c.note ? ` (${c.note})` : ""}
@@ -3756,7 +3756,7 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
           {data.recyclingSales.map((s) => (
             <li key={s.id} className="py-1.5 flex items-center justify-between text-xs">
               <span className="text-slate-600">
-                {new Date(s.date).toLocaleDateString("fr-FR")} — {productLabel(s.productId)} — {s.buyer || "Acheteur"} : {s.quantity} ×{" "}
+                {new Date(s.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {productLabel(s.productId)} — {s.buyer || "Acheteur"} : {s.quantity} ×{" "}
                 {fcfa(s.unitPrice)} = {fcfa(s.quantity * s.unitPrice)}
               </span>
               <ConfirmDeleteButton onConfirm={() => onDeleteSale(s.id)} label={`Supprimer cette vente (${fcfa(s.quantity * s.unitPrice)}) ?`} />
@@ -3860,7 +3860,7 @@ function BalanceTab({
             {data.withdrawals.map((w) => (
               <li key={w.id} className="py-1.5 flex items-center justify-between text-xs">
                 <span className="text-slate-600">
-                  {new Date(w.date).toLocaleDateString("fr-FR")} — {fcfa(w.amount)}
+                  {new Date(w.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {fcfa(w.amount)}
                   {w.note ? ` (${w.note})` : ""}
                 </span>
                 <ConfirmDeleteButton onConfirm={() => onDeleteWithdrawal(w.id)} label={`Supprimer ce retrait de ${fcfa(w.amount)} ?`} />
@@ -3881,7 +3881,7 @@ function BalanceTab({
       <Card>
         <SectionTitle icon={Wallet}>Trésorerie de départ</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
-          Montant en caisse au {new Date(data.meta.startDate).toLocaleDateString("fr-FR")} (avant toute vente enregistrée ici).
+          Montant en caisse au {new Date(data.meta.startDate).toLocaleDateString("fr-FR", { timeZone: "UTC" })} (avant toute vente enregistrée ici).
         </p>
         <div className="flex gap-2">
           <Input type="number" value={cash} onChange={(e) => setCash(e.target.value)} />
@@ -3959,7 +3959,7 @@ function BalanceTab({
             <li key={n.id} className="py-1.5 flex items-center justify-between text-sm">
               <span>
                 {n.label}
-                <span className="text-slate-400 text-xs ml-1">({new Date(n.date).toLocaleDateString("fr-FR")})</span>
+                <span className="text-slate-400 text-xs ml-1">({new Date(n.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })})</span>
               </span>
               <span className="flex items-center gap-2">
                 <span className="font-mono text-slate-600">{fcfa(n.amount)}</span>
@@ -4115,7 +4115,7 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported }) {
         </p>
         <p className={`text-xs mb-2 font-medium ${daysSinceExport === null || daysSinceExport > 3 ? "text-amber-600" : "text-teal-700"}`}>
           {lastExport
-            ? `Dernière sauvegarde exportée : ${lastExport.toLocaleDateString("fr-FR")} (il y a ${daysSinceExport} j)`
+            ? `Dernière sauvegarde exportée : ${lastExport.toLocaleDateString("fr-FR", { timeZone: "UTC" })} (il y a ${daysSinceExport} j)`
             : "Aucune sauvegarde exportée pour l'instant — pense à en faire une !"}
         </p>
         <div className="grid grid-cols-2 gap-2">
