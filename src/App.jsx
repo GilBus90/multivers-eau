@@ -2017,7 +2017,19 @@ function productOptions(products, brand, filterFn) {
 /* Navigateur de date : recule/avance jour par jour ou de 7 jours, ou saute  */
 /* directement à une date via le calendrier natif.                          */
 function DateNav({ value, onChange }) {
+  const busyRef = useRef(false);
   const shift = (days) => {
+    // Garde-fou : ignore tout second appel qui arriverait dans la même
+    // fraction de seconde (double déclenchement du clic sur ordinateur).
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setTimeout(() => { busyRef.current = false; }, 200);
+    // Coupe le focus du champ date natif : sur ordinateur, un champ date
+    // encore focus peut réagir lui-même aux flèches/molette et fausser le
+    // résultat du clic sur nos propres boutons.
+    if (document.activeElement && document.activeElement.tagName === "INPUT") {
+      document.activeElement.blur();
+    }
     const d = new Date(value + "T00:00:00");
     d.setDate(d.getDate() + days);
     onChange(d.toISOString().slice(0, 10));
@@ -2025,10 +2037,20 @@ function DateNav({ value, onChange }) {
   const isToday = value === todayISO();
   return (
     <div className="flex items-center gap-1">
-      <button type="button" onClick={() => shift(-7)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="-7 jours">
+      <button
+        type="button"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(-7); }}
+        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        title="-7 jours"
+      >
         <ChevronsLeft size={15} />
       </button>
-      <button type="button" onClick={() => shift(-1)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="Jour précédent">
+      <button
+        type="button"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(-1); }}
+        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        title="Jour précédent"
+      >
         <ChevronLeft size={15} />
       </button>
       <div className="relative flex-1">
@@ -2039,14 +2061,28 @@ function DateNav({ value, onChange }) {
           className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-center focus:outline-none focus:ring-2 focus:ring-teal-300"
         />
       </div>
-      <button type="button" onClick={() => shift(1)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="Jour suivant">
+      <button
+        type="button"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(1); }}
+        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        title="Jour suivant"
+      >
         <ChevronRight size={15} />
       </button>
-      <button type="button" onClick={() => shift(7)} className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200" title="+7 jours">
+      <button
+        type="button"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(7); }}
+        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        title="+7 jours"
+      >
         <ChevronsRight size={15} />
       </button>
       {!isToday && (
-        <button type="button" onClick={() => onChange(todayISO())} className="px-2 py-1.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-semibold whitespace-nowrap">
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange(todayISO()); }}
+          className="px-2 py-1.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-semibold whitespace-nowrap"
+        >
           Aujourd'hui
         </button>
       )}
@@ -2063,6 +2099,7 @@ function Dashboard({ data, totals, productsById }) {
   );
   const journalProfit = journalOps.reduce((s, o) => s + totals.profitOf(o), 0);
   const journalRevenue = journalOps.reduce((s, o) => s + totals.revenueOf(o), 0);
+  const [showAllBestSellers, setShowAllBestSellers] = useState(false);
   const bestSellers = useMemo(() => {
     const map = {};
     totals.allOps.forEach((o) => {
@@ -2073,9 +2110,9 @@ function Dashboard({ data, totals, productsById }) {
     return Object.entries(map)
       .map(([id, q]) => ({ id, gros: q.gros, detail: q.detail, p: productsById[id] }))
       .filter((x) => x.p)
-      .sort((a, b) => b.gros + b.detail - (a.gros + a.detail))
-      .slice(0, 5);
+      .sort((a, b) => b.gros + b.detail - (a.gros + a.detail));
   }, [totals.allOps, productsById]);
+  const bestSellersShown = showAllBestSellers ? bestSellers : bestSellers.slice(0, 5);
 
   const lastExport = data.meta.lastExportAt ? new Date(data.meta.lastExportAt) : null;
   const daysSinceExport = lastExport ? Math.round((Date.now() - lastExport.getTime()) / 86400000) : null;
@@ -2365,7 +2402,7 @@ function Dashboard({ data, totals, productsById }) {
         <SectionTitle icon={Package}>Top articles vendus (cumul)</SectionTitle>
         {bestSellers.length === 0 && <p className="text-sm text-slate-400">Aucune vente enregistrée pour le moment.</p>}
         <ul className="divide-y divide-slate-100">
-          {bestSellers.map(({ id, gros, detail, p }) => (
+          {bestSellersShown.map(({ id, gros, detail, p }) => (
             <li key={id} className="py-1.5 text-sm">
               <div className="flex items-center gap-2 mb-0.5">
                 <span className={`w-2 h-2 rounded-full ${getBrandColor(p.brand).dot}`} />
@@ -2382,6 +2419,15 @@ function Dashboard({ data, totals, productsById }) {
             </li>
           ))}
         </ul>
+        {bestSellers.length > 5 && (
+          <button
+            type="button"
+            onClick={() => setShowAllBestSellers((v) => !v)}
+            className="w-full text-center text-xs font-semibold text-teal-700 mt-2 py-1.5 rounded-lg bg-teal-50"
+          >
+            {showAllBestSellers ? "Voir moins" : `Voir plus (${bestSellers.length - 5} de plus)`}
+          </button>
+        )}
       </Card>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
