@@ -902,7 +902,18 @@ function buildDefaultProducts() {
   });
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Formate une date en "aaaa-mm-jj" à partir de ses composantes LOCALES —
+// contrairement à toISOString() (qui convertit en UTC et peut donc décaler
+// la date d'un jour selon le fuseau horaire réglé sur l'ordinateur), ceci
+// donne toujours la date telle qu'affichée sur l'appareil de l'utilisateur.
+function localISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+const todayISO = () => localISO(new Date());
 
 /* Stock est géré en LOTS (FIFO) : chaque entrée de stock (stock initial,   */
 /* réappro, ouverture de colis) crée un lot daté, numéroté séquentiellement */
@@ -1677,6 +1688,15 @@ export default function App({ uid: currentUid, onSignOut }) {
           .no-print, header, nav, input, select, button, textarea { display: none !important; }
           body { background: white !important; }
         }
+        /* Les boutons natifs "effacer" et "incrémenter" de Chrome/Edge sur les
+           champs date ont une zone cliquable qui peut déborder légèrement sur
+           le bouton "jour suivant" juste à côté, sur ordinateur. On les
+           désactive : le bouton "calendrier" natif reste utilisable. */
+        input[type="date"]::-webkit-clear-button,
+        input[type="date"]::-webkit-inner-spin-button {
+          display: none;
+          -webkit-appearance: none;
+        }
       `}</style>
       <header className="no-print sticky top-0 z-20 bg-teal-800 text-white px-4 py-3 flex items-center gap-2 shadow-sm">
         <span className="flex items-center justify-center w-8 h-8 rounded-full bg-white shrink-0">
@@ -1872,7 +1892,7 @@ function computeTotals(data) {
   const days = [...Array(14)].map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (13 - i));
-    return d.toISOString().slice(0, 10);
+    return localISO(d);
   });
   const chartData = days.map((d) => ({
     day: d.slice(5),
@@ -1886,7 +1906,7 @@ function computeTotals(data) {
     const d = new Date();
     d.setDate(1);
     d.setMonth(d.getMonth() - (11 - i));
-    return d.toISOString().slice(0, 7);
+    return localISO(d).slice(0, 7);
   });
   const costOf = (o) => o.qty * o.unitCost;
   const monthlyData = months.map((m) => {
@@ -2032,15 +2052,15 @@ function DateNav({ value, onChange }) {
     }
     const d = new Date(value + "T00:00:00");
     d.setDate(d.getDate() + days);
-    onChange(d.toISOString().slice(0, 10));
+    onChange(localISO(d));
   };
   const isToday = value === todayISO();
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1.5">
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(-7); }}
-        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        className="relative z-10 p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
         title="-7 jours"
       >
         <ChevronsLeft size={15} />
@@ -2048,7 +2068,7 @@ function DateNav({ value, onChange }) {
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(-1); }}
-        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        className="relative z-10 p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
         title="Jour précédent"
       >
         <ChevronLeft size={15} />
@@ -2064,7 +2084,7 @@ function DateNav({ value, onChange }) {
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(1); }}
-        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        className="relative z-10 p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
         title="Jour suivant"
       >
         <ChevronRight size={15} />
@@ -2072,7 +2092,7 @@ function DateNav({ value, onChange }) {
       <button
         type="button"
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); shift(7); }}
-        className="p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
+        className="relative z-10 p-1.5 rounded-lg bg-slate-100 text-slate-500 active:bg-slate-200"
         title="+7 jours"
       >
         <ChevronsRight size={15} />
@@ -2081,7 +2101,7 @@ function DateNav({ value, onChange }) {
         <button
           type="button"
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange(todayISO()); }}
-          className="px-2 py-1.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-semibold whitespace-nowrap"
+          className="relative z-10 px-2 py-1.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-semibold whitespace-nowrap"
         >
           Aujourd'hui
         </button>
@@ -2136,7 +2156,7 @@ function Dashboard({ data, totals, productsById }) {
     const addDays = (iso, n) => {
       const d = new Date(iso + "T00:00:00");
       d.setDate(d.getDate() + n);
-      return d.toISOString().slice(0, 10);
+      return localISO(d);
     };
     if (key === "today") {
       setReportStart(today0);
