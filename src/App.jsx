@@ -1014,6 +1014,22 @@ function migrate(d) {
   if (!d.expenses) d = { ...d, expenses: [] };
   if (!d.recyclingCollections) d = { ...d, recyclingCollections: [] };
   if (!d.recyclingSales) d = { ...d, recyclingSales: [] };
+  if (d.sales && d.sales.some((s) => !s.payments)) {
+    d = {
+      ...d,
+      sales: d.sales.map((s) =>
+        s.payments ? s : { ...s, payments: s.paidAmount > 0 ? [{ id: uid(), date: s.date, amount: s.paidAmount }] : [] }
+      ),
+    };
+  }
+  if (d.detailSales && d.detailSales.some((s) => !s.payments)) {
+    d = {
+      ...d,
+      detailSales: d.detailSales.map((s) =>
+        s.payments ? s : { ...s, payments: s.paidAmount > 0 ? [{ id: uid(), date: s.date, amount: s.paidAmount }] : [] }
+      ),
+    };
+  }
   if (d.loans && d.loans.some((l) => !l.repayments)) {
     d = {
       ...d,
@@ -1218,6 +1234,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       unitCost: res.avgCost,
       mode: sale.mode,
       paidAmount: sale.mode === "cash" ? total : 0,
+      payments: sale.mode === "cash" ? [{ id: uid(), date: sale.date, amount: total }] : [],
     };
     const next = {
       ...data,
@@ -1254,6 +1271,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         unitCost: res.avgCost,
         mode: sale.mode,
         paidAmount: sale.mode === "cash" ? total : 0,
+        payments: sale.mode === "cash" ? [{ id: uid(), date: sale.date, amount: total }] : [],
       };
       working = {
         ...working,
@@ -1325,6 +1343,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       unitCost: res.avgCost,
       mode: sale.mode,
       paidAmount: sale.mode === "cash" ? total : 0,
+      payments: sale.mode === "cash" ? [{ id: uid(), date: sale.date, amount: total }] : [],
     };
     const next = {
       ...data,
@@ -1453,13 +1472,16 @@ export default function App({ uid: currentUid, onSignOut }) {
     showToast("Prêt supprimé");
   };
 
-  const recordPayment = (kind, id, amount) => {
+  const recordPayment = (kind, id, amount, date) => {
     const list = kind === "sales" ? data.sales : data.detailSales;
     const next = {
       ...data,
-      [kind]: list.map((s) =>
-        s.id === id ? { ...s, paidAmount: Math.min(s.qty * s.unitPrice, s.paidAmount + amount) } : s
-      ),
+      [kind]: list.map((s) => {
+        if (s.id !== id) return s;
+        const paidAmount = Math.min(s.qty * s.unitPrice, s.paidAmount + amount);
+        const payments = [...(s.payments || []), { id: uid(), date: date || todayISO(), amount }];
+        return { ...s, paidAmount, payments };
+      }),
     };
     persist(next);
     showToast("Paiement enregistré");
@@ -1739,7 +1761,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         {tab === "detail" && (
           <DetailTab data={data} totals={totals} productsById={productsById} onOpen={openPack} onSell={addDetailSale} onPay={(id, a) => recordPayment("detailSales", id, a)} onDeleteSale={deleteDetailSale} onDeleteOpening={deleteOpening} />
         )}
-        {tab === "clients" && <ClientsTab data={data} totals={totals} onPaySale={(id, a) => recordPayment("sales", id, a)} onPayDetail={(id, a) => recordPayment("detailSales", id, a)} />}
+        {tab === "clients" && <ClientsTab data={data} totals={totals} onPaySale={(id, a, d) => recordPayment("sales", id, a, d)} onPayDetail={(id, a, d) => recordPayment("detailSales", id, a, d)} />}
         {tab === "loans" && <LoansTab data={data} onAdd={addLoan} onRepay={repayLoan} onDelete={deleteLoan} onDeleteRepayment={deleteRepayment} />}
         {tab === "stock" && <StockTab data={data} productsById={productsById} totals={totals} onRestock={addRestock} onDeleteRestock={deleteRestock} />}
         {tab === "expenses" && <ExpensesTab data={data} totals={totals} onAdd={addExpense} onDelete={deleteExpense} />}
@@ -2884,6 +2906,7 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
   const [payFor, setPayFor] = useState(null); // {kind, id, max}
   const [amount, setAmount] = useState("");
   const [search, setSearch] = useState("");
+  const daysBetween = (d1, d2) => Math.round((new Date(d2) - new Date(d1)) / 86400000);
 
   const debts = useMemo(() => {
     const map = {};
@@ -2901,10 +2924,56 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
 
   const totalDebt = debts.reduce((s, d) => s + d.total, 0);
 
+  // Classement de fiabilité : pour chaque client, le délai moyen (en jours)
+  // entre la date d'achat à crédit et la date où il règle — pour repérer
+  // d'un coup d'œil les clients sérieux qui payent vite.
+  const reliability = useMemo(() => {
+    const map = {};
+    const collect = (list) => {
+      list.forEach((o) => {
+        if (o.mode !== "credit" || !o.payments) return;
+        o.payments.forEach((p) => {
+          if (!map[o.client]) map[o.client] = { client: o.client, delays: [] };
+          map[o.client].delays.push(daysBetween(o.date, p.date));
+        });
+      });
+    };
+    collect(data.sales);
+    collect(data.detailSales);
+    return Object.values(map)
+      .map((c) => ({ ...c, avgDays: Math.round(c.delays.reduce((s, d) => s + d, 0) / c.delays.length), count: c.delays.length }))
+      .sort((a, b) => a.avgDays - b.avgDays);
+  }, [data.sales, data.detailSales]);
+
+  // Créances soldées récemment : ventes à crédit désormais entièrement
+  // payées, avec la date du dernier versement qui les a soldées.
+  const settledDebts = useMemo(() => {
+    const items = [];
+    const collect = (list, kind) => {
+      list.forEach((o) => {
+        if (o.mode !== "credit" || !o.payments || o.payments.length === 0) return;
+        const due = o.qty * o.unitPrice - o.paidAmount;
+        if (due > 0) return;
+        const lastPayment = [...o.payments].sort((a, b) => b.date.localeCompare(a.date))[0];
+        items.push({
+          id: o.id,
+          client: o.client,
+          kind,
+          amount: o.qty * o.unitPrice,
+          purchaseDate: o.date,
+          settledDate: lastPayment.date,
+          delay: daysBetween(o.date, lastPayment.date),
+        });
+      });
+    };
+    collect(data.sales, "sales");
+    collect(data.detailSales, "detailSales");
+    return items.sort((a, b) => b.settledDate.localeCompare(a.settledDate)).slice(0, 10);
+  }, [data.sales, data.detailSales]);
+
   // Base clients : tous les clients ayant déjà acheté, avec leur date de
   // dernier achat — pour relancer ceux qu'on n'a pas revus depuis longtemps.
   const today = todayISO();
-  const daysBetween = (d1, d2) => Math.round((new Date(d2) - new Date(d1)) / 86400000);
   const clientBase = useMemo(() => {
     const map = {};
     totals.allOps.forEach((o) => {
@@ -2920,13 +2989,16 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
       .sort((a, b) => b.daysSince - a.daysSince);
   }, [totals.allOps, search, today]);
 
+  const [payDate, setPayDate] = useState(todayISO());
+
   const confirmPay = () => {
     if (!payFor || !amount) return;
     const amt = Math.min(Number(amount), payFor.max);
-    if (payFor.kind === "sales") onPaySale(payFor.id, amt);
-    else onPayDetail(payFor.id, amt);
+    if (payFor.kind === "sales") onPaySale(payFor.id, amt, payDate);
+    else onPayDetail(payFor.id, amt, payDate);
     setPayFor(null);
     setAmount("");
+    setPayDate(todayISO());
   };
 
   return (
@@ -2953,21 +3025,84 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
           </div>
           <ul className="divide-y divide-slate-100">
             {d.items.map((it) => (
-              <li key={it.id} className="py-1.5 flex items-center justify-between text-xs">
-                <span className="text-slate-500">
-                  {new Date(it.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {it.kind === "sales" ? "Gros" : "Détail"} — dû {fcfa(it.due)}
-                </span>
-                <button
-                  className="text-teal-700 font-semibold flex items-center gap-0.5"
-                  onClick={() => setPayFor({ kind: it.kind, id: it.id, max: it.due })}
-                >
-                  Encaisser <ChevronRight size={12} />
-                </button>
+              <li key={it.id} className="py-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">
+                    Achat du {new Date(it.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {it.kind === "sales" ? "Gros" : "Détail"} —
+                    dû {fcfa(it.due)}
+                  </span>
+                  <button
+                    className="text-teal-700 font-semibold flex items-center gap-0.5"
+                    onClick={() => setPayFor({ kind: it.kind, id: it.id, max: it.due })}
+                  >
+                    Encaisser <ChevronRight size={12} />
+                  </button>
+                </div>
+                {it.payments && it.payments.length > 0 && (
+                  <div className="text-slate-400 mt-0.5 pl-1">
+                    {it.payments.map((p) => (
+                      <div key={p.id}>
+                        Encaissé {fcfa(p.amount)} le <b className="text-slate-600">{new Date(p.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</b>
+                        {" "}
+                        ({daysBetween(it.date, p.date)} j après l'achat)
+                      </div>
+                    ))}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         </Card>
       ))}
+
+      {settledDebts.length > 0 && (
+        <Card>
+          <SectionTitle icon={Check}>Créances soldées récemment</SectionTitle>
+          <ul className="divide-y divide-slate-100">
+            {settledDebts.map((s) => (
+              <li key={s.id} className="py-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">
+                    {s.client} — {s.kind === "sales" ? "Gros" : "Détail"} — {fcfa(s.amount)}
+                  </span>
+                  <span className="text-teal-700 font-semibold">{s.delay} j</span>
+                </div>
+                <div className="text-slate-400">
+                  Acheté le {new Date(s.purchaseDate).toLocaleDateString("fr-FR", { timeZone: "UTC" })} → soldée le{" "}
+                  <b className="text-slate-600">{new Date(s.settledDate).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</b>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {reliability.length > 0 && (
+        <Card>
+          <SectionTitle icon={Users}>Classement — rapidité de paiement</SectionTitle>
+          <p className="text-xs text-slate-500 mb-2">
+            Délai moyen entre la date d'achat à crédit et la date d'encaissement — du plus rapide (clients sérieux) au plus lent.
+          </p>
+          <ul className="divide-y divide-slate-100">
+            {reliability.map((c, i) => (
+              <li key={c.client} className="py-1.5 flex items-center justify-between text-sm">
+                <span>
+                  <span className="text-slate-400 text-xs mr-1.5">#{i + 1}</span>
+                  {c.client}
+                  <span className="text-slate-400 text-xs ml-1.5">({c.count} paiement{c.count > 1 ? "s" : ""})</span>
+                </span>
+                <span
+                  className={`font-mono font-semibold ${
+                    c.avgDays <= 3 ? "text-teal-700" : c.avgDays <= 14 ? "text-amber-600" : "text-rose-600"
+                  }`}
+                >
+                  {c.avgDays} j en moyenne
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card>
         <SectionTitle icon={Users}>Base clients (relance)</SectionTitle>
@@ -3000,6 +3135,7 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
       {payFor && (
         <Modal onClose={() => setPayFor(null)} title="Encaisser un paiement">
           <p className="text-xs text-slate-500 mb-2">Montant dû : {fcfa(payFor.max)}</p>
+          <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="mb-2" />
           <Input type="number" placeholder="Montant reçu" value={amount} onChange={(e) => setAmount(e.target.value)} className="mb-2" />
           <Btn onClick={confirmPay} className="w-full">
             <Check size={16} /> Valider l'encaissement
