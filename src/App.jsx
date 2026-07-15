@@ -1487,6 +1487,36 @@ export default function App({ uid: currentUid, onSignOut }) {
     showToast("Paiement enregistré");
   };
 
+  // Annule un versement précis — recalcule le montant payé à partir de
+  // l'historique restant. Si c'était le seul versement, la créance redevient
+  // entièrement due, exactement comme avant l'encaissement.
+  const deletePayment = (kind, id, paymentId) => {
+    const list = kind === "sales" ? data.sales : data.detailSales;
+    const next = {
+      ...data,
+      [kind]: list.map((s) => {
+        if (s.id !== id) return s;
+        const payments = (s.payments || []).filter((p) => p.id !== paymentId);
+        const paidAmount = payments.reduce((sum, p) => sum + p.amount, 0);
+        return { ...s, paidAmount, payments };
+      }),
+    };
+    persist(next);
+    showToast("Versement annulé — créance rouverte");
+  };
+
+  // Rouvre entièrement une créance soldée (efface tous les versements d'un
+  // coup) — pour les cas où l'encaissement a été enregistré par erreur.
+  const resetPayments = (kind, id) => {
+    const list = kind === "sales" ? data.sales : data.detailSales;
+    const next = {
+      ...data,
+      [kind]: list.map((s) => (s.id === id ? { ...s, paidAmount: 0, payments: [] } : s)),
+    };
+    persist(next);
+    showToast("Créance rouverte — dette rétablie");
+  };
+
   const addLoan = (loan) => {
     const next = { ...data, loans: [{ id: uid(), repayments: [], ...loan }, ...data.loans] };
     persist(next);
@@ -1761,7 +1791,16 @@ export default function App({ uid: currentUid, onSignOut }) {
         {tab === "detail" && (
           <DetailTab data={data} totals={totals} productsById={productsById} onOpen={openPack} onSell={addDetailSale} onPay={(id, a) => recordPayment("detailSales", id, a)} onDeleteSale={deleteDetailSale} onDeleteOpening={deleteOpening} />
         )}
-        {tab === "clients" && <ClientsTab data={data} totals={totals} onPaySale={(id, a, d) => recordPayment("sales", id, a, d)} onPayDetail={(id, a, d) => recordPayment("detailSales", id, a, d)} />}
+        {tab === "clients" && (
+          <ClientsTab
+            data={data}
+            totals={totals}
+            onPaySale={(id, a, d) => recordPayment("sales", id, a, d)}
+            onPayDetail={(id, a, d) => recordPayment("detailSales", id, a, d)}
+            onDeletePayment={(kind, id, paymentId) => deletePayment(kind, id, paymentId)}
+            onResetPayments={(kind, id) => resetPayments(kind, id)}
+          />
+        )}
         {tab === "loans" && <LoansTab data={data} onAdd={addLoan} onRepay={repayLoan} onDelete={deleteLoan} onDeleteRepayment={deleteRepayment} />}
         {tab === "stock" && <StockTab data={data} productsById={productsById} totals={totals} onRestock={addRestock} onDeleteRestock={deleteRestock} />}
         {tab === "expenses" && <ExpensesTab data={data} totals={totals} onAdd={addExpense} onDelete={deleteExpense} />}
@@ -2902,7 +2941,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
 
 /* -------------------------------- Clients --------------------------------- */
 
-function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
+function ClientsTab({ data, totals, onPaySale, onPayDetail, onDeletePayment, onResetPayments }) {
   const [payFor, setPayFor] = useState(null); // {kind, id, max}
   const [amount, setAmount] = useState("");
   const [search, setSearch] = useState("");
@@ -3041,10 +3080,17 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
                 {it.payments && it.payments.length > 0 && (
                   <div className="text-slate-400 mt-0.5 pl-1">
                     {it.payments.map((p) => (
-                      <div key={p.id}>
-                        Encaissé {fcfa(p.amount)} le <b className="text-slate-600">{new Date(p.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</b>
-                        {" "}
-                        ({daysBetween(it.date, p.date)} j après l'achat)
+                      <div key={p.id} className="flex items-center justify-between gap-2">
+                        <span>
+                          Encaissé {fcfa(p.amount)} le <b className="text-slate-600">{new Date(p.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</b>
+                          {" "}
+                          ({daysBetween(it.date, p.date)} j après l'achat)
+                        </span>
+                        <ConfirmDeleteButton
+                          size={11}
+                          onConfirm={() => onDeletePayment(it.kind, it.id, p.id)}
+                          label={`Annuler ce versement de ${fcfa(p.amount)} et rouvrir la créance d'autant ?`}
+                        />
                       </div>
                     ))}
                   </div>
@@ -3065,7 +3111,14 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail }) {
                   <span className="text-slate-600">
                     {s.client} — {s.kind === "sales" ? "Gros" : "Détail"} — {fcfa(s.amount)}
                   </span>
-                  <span className="text-teal-700 font-semibold">{s.delay} j</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-teal-700 font-semibold">{s.delay} j</span>
+                    <ConfirmDeleteButton
+                      size={12}
+                      onConfirm={() => onResetPayments(s.kind, s.id)}
+                      label={`Rouvrir cette créance de ${fcfa(s.amount)} pour ${s.client} — comme si elle n'avait jamais été payée ?`}
+                    />
+                  </div>
                 </div>
                 <div className="text-slate-400">
                   Acheté le {new Date(s.purchaseDate).toLocaleDateString("fr-FR", { timeZone: "UTC" })} → soldée le{" "}
