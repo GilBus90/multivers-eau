@@ -2020,8 +2020,12 @@ function computeTotals(data) {
 
 /* ------------------------------ UI pièces ------------------------------- */
 
-function Card({ children, className = "" }) {
-  return <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 p-4 ${className}`}>{children}</div>;
+function Card({ children, className = "", ...rest }) {
+  return (
+    <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 p-4 ${className}`} {...rest}>
+      {children}
+    </div>
+  );
 }
 
 function SectionTitle({ children, icon: Icon }) {
