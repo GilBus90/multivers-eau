@@ -1739,6 +1739,11 @@ export default function App({ uid: currentUid, onSignOut }) {
         @media print {
           .no-print, header, nav, input, select, button, textarea { display: none !important; }
           body { background: white !important; }
+          /* Impression ciblée : quand une seule sous-rubrique est choisie
+             (bouton "Imprimer" d'une carte précise), on masque toutes les
+             autres et on ne garde que celle-là. */
+          body[data-print-only] [data-print-section] { display: none !important; }
+          body[data-print-only] [data-print-section].print-target-active { display: block !important; }
         }
         /* Les boutons natifs "effacer" et "incrémenter" de Chrome/Edge sur les
            champs date ont une zone cliquable qui peut déborder légèrement sur
@@ -2297,7 +2302,7 @@ function Dashboard({ data, totals, productsById }) {
         </div>
       )}
 
-      <Card>
+      <Card data-print-section="citations">
         <SectionTitle icon={Droplet}>Citations du jour</SectionTitle>
         <div className="space-y-3">
           <DateNav value={quoteDate} onChange={setQuoteDate} />
@@ -2318,6 +2323,12 @@ function Dashboard({ data, totals, productsById }) {
               `💧 "${waterQuote.text}" — ${waterQuote.author}\n\n♻️ "${recyclingQuote.text}" — ${recyclingQuote.author}\n\nMultivers'Eau`
             }
           />
+          <PrintOrCopy
+            printKey="citations"
+            getText={() =>
+              `💧 "${waterQuote.text}" — ${waterQuote.author}\n\n♻️ "${recyclingQuote.text}" — ${recyclingQuote.author}\n\nMultivers'Eau`
+            }
+          />
         </div>
       </Card>
 
@@ -2327,8 +2338,10 @@ function Dashboard({ data, totals, productsById }) {
         <StatCard label="Bénéfice année" value={fcfa(totals.year.profit)} tone="slate" />
       </div>
 
-      <Card>
-        <SectionTitle icon={Calendar}>Journal du jour</SectionTitle>
+      <Card data-print-section="journal">
+        <div className="flex items-center justify-between mb-1">
+          <SectionTitle icon={Calendar}>Journal du jour</SectionTitle>
+        </div>
         <DateNav value={journalDate} onChange={setJournalDate} />
         <div className="flex justify-between mt-3 mb-1 text-xs">
           <span className="text-slate-500">
@@ -2356,9 +2369,22 @@ function Dashboard({ data, totals, productsById }) {
             );
           })}
         </ul>
+        <PrintOrCopy
+          printKey="journal"
+          getText={() =>
+            `Journal du ${new Date(journalDate + "T00:00:00Z").toLocaleDateString("fr-FR", { timeZone: "UTC" })} — Multivers'Eau\n` +
+            `CA : ${fcfa(journalRevenue)}\nBénéfice : ${fcfa(journalProfit)}\n\n` +
+            journalOps
+              .map((o) => {
+                const p = productsById[o.productId];
+                return `${o.client} — ${p?.brand} ${p?.format}${o.kind === "detail" ? " (u.)" : ""} × ${o.qty} : ${fcfa(o.qty * o.unitPrice)}`;
+              })
+              .join("\n")
+          }
+        />
       </Card>
 
-      <Card>
+      <Card data-print-section="rapport">
         <div className="flex items-center justify-between mb-2">
           <SectionTitle icon={Printer}>Rapport — toutes rubriques</SectionTitle>
         </div>
@@ -2406,6 +2432,7 @@ function Dashboard({ data, totals, productsById }) {
         />
         <PrintOrCopy
           className="mt-2"
+          printKey="rapport"
           getText={() =>
             `Rapport Multivers'Eau — ${reportLabel}\n` +
             `Ventes (CA) : ${fcfa(reportStats.ventesCA)}\n` +
@@ -2418,7 +2445,7 @@ function Dashboard({ data, totals, productsById }) {
         />
       </Card>
 
-      <Card>
+      <Card data-print-section="chart14">
         <SectionTitle icon={TrendingUp}>Bénéfice — 14 derniers jours</SectionTitle>
         <div style={{ width: "100%", height: 160 }}>
           <ResponsiveContainer>
@@ -2431,9 +2458,10 @@ function Dashboard({ data, totals, productsById }) {
             </BarChart>
           </ResponsiveContainer>
         </div>
+        <ScopedPrintButton printKey="chart14" label="Imprimer ce graphique" />
       </Card>
 
-      <Card>
+      <Card data-print-section="chart12">
         <SectionTitle icon={TrendingUp}>Synthèse mensuelle — coût d'achat vs ventes</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
           "Coût d'achat" = ce qu'ont coûté les articles réellement vendus ce mois-ci (pas les réappros du mois). Ventes − Coût d'achat
@@ -2453,6 +2481,7 @@ function Dashboard({ data, totals, productsById }) {
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+        <ScopedPrintButton printKey="chart12" label="Imprimer ce graphique" />
       </Card>
 
       <div className="grid grid-cols-2 gap-2">
@@ -2479,7 +2508,7 @@ function Dashboard({ data, totals, productsById }) {
         </div>
       </Card>
 
-      <Card>
+      <Card data-print-section="topsellers">
         <SectionTitle icon={Package}>Top articles vendus (cumul)</SectionTitle>
         {bestSellers.length === 0 && <p className="text-sm text-slate-400">Aucune vente enregistrée pour le moment.</p>}
         <ul className="divide-y divide-slate-100">
@@ -2509,6 +2538,14 @@ function Dashboard({ data, totals, productsById }) {
             {showAllBestSellers ? "Voir moins" : `Voir plus (${bestSellers.length - 5} de plus)`}
           </button>
         )}
+        <PrintOrCopy
+          className="mt-2"
+          printKey="topsellers"
+          getText={() =>
+            `Top articles vendus (cumul) — Multivers'Eau\n\n` +
+            bestSellers.map(({ p, gros, detail }) => `${p.brand} — ${p.format} : Gros ${gros}, Détail ${detail}`).join("\n")
+          }
+        />
       </Card>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
@@ -2699,6 +2736,7 @@ function SalesTab({ data, productsById, onAdd, onBatchAdd, onDelete }) {
         {showCatchUp && <CatchUpBatch data={data} productsById={productsById} onBatchAdd={onBatchAdd} onClose={() => setShowCatchUp(false)} />}
       </Card>
 
+      <div data-print-section="historique-ventes-gros">
       <Card>
         <SectionTitle icon={ShoppingCart}>Historique (40 dernières)</SectionTitle>
         {list.length === 0 && <p className="text-sm text-slate-400">Aucune vente enregistrée.</p>}
@@ -2735,6 +2773,21 @@ function SalesTab({ data, productsById, onAdd, onBatchAdd, onDelete }) {
           })}
         </ul>
       </Card>
+      {list.length > 0 && (
+        <PrintOrCopy
+          printKey="historique-ventes-gros"
+          getText={() =>
+            `Historique des ventes en gros — Multivers'Eau\n\n` +
+            list
+              .map((s) => {
+                const p = productsById[s.productId];
+                return `${s.date} — ${s.client} — ${p?.brand} ${p?.format} × ${s.qty} : ${fcfa(s.qty * s.unitPrice)}`;
+              })
+              .join("\n")
+          }
+        />
+      )}
+      </div>
     </div>
   );
 }
@@ -2795,6 +2848,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
         tone="amber"
       />
 
+      <div data-print-section="colis-ouverts">
       <Card>
         <SectionTitle icon={Package}>Suivi des colis ouverts</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
@@ -2822,6 +2876,16 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
           ))}
         </ul>
       </Card>
+      {openPacksInProgress.length > 0 && (
+        <PrintOrCopy
+          printKey="colis-ouverts"
+          getText={() =>
+            `Suivi des colis ouverts — Multivers'Eau\n\n` +
+            openPacksInProgress.map((o) => `${o.product.brand} ${o.product.format} — Lot #${o.lotNo} : ${o.sold}/${o.total} vendues (${o.remaining} restantes)`).join("\n")
+          }
+        />
+      )}
+      </div>
 
       <Card>
         <SectionTitle icon={Scissors}>1. Ouvrir un colis pour le détail</SectionTitle>
@@ -2880,6 +2944,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
         </Btn>
       </Card>
 
+      <div data-print-section="historique-detail">
       <Card>
         <SectionTitle icon={Scissors}>Historique détail (40 dernières)</SectionTitle>
         {list.length === 0 && <p className="text-sm text-slate-400">Aucune vente au détail.</p>}
@@ -2914,7 +2979,23 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
           })}
         </ul>
       </Card>
+      {list.length > 0 && (
+        <PrintOrCopy
+          printKey="historique-detail"
+          getText={() =>
+            `Historique des ventes au détail — Multivers'Eau\n\n` +
+            list
+              .map((s) => {
+                const p = productsById[s.productId];
+                return `${s.date} — ${s.client} — ${p?.brand} ${p?.format} (u.) × ${s.qty} : ${fcfa(s.qty * s.unitPrice)}`;
+              })
+              .join("\n")
+          }
+        />
+      )}
+      </div>
 
+      <div data-print-section="historique-ouvertures">
       <Card>
         <SectionTitle icon={Scissors}>Historique des ouvertures de colis</SectionTitle>
         {openingsList.length === 0 && <p className="text-sm text-slate-400">Aucune ouverture enregistrée.</p>}
@@ -2935,6 +3016,21 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
           })}
         </ul>
       </Card>
+      {openingsList.length > 0 && (
+        <PrintOrCopy
+          printKey="historique-ouvertures"
+          getText={() =>
+            `Historique des ouvertures de colis — Multivers'Eau\n\n` +
+            openingsList
+              .map((o) => {
+                const p = productsById[o.productId];
+                return `${o.date} — ${p?.brand} ${p?.format} ouvert (+${p?.units} u.)`;
+              })
+              .join("\n")
+          }
+        />
+      )}
+      </div>
     </div>
   );
 }
@@ -3042,13 +3138,8 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail, onDeletePayment, onR
 
   return (
     <div className="space-y-3">
-      <PrintOrCopy
-        getText={() =>
-          `Créances clients — Multivers'Eau\nTotal dû : ${fcfa(totalDebt)}\n\n` +
-          debts.map((d) => `${d.client} : ${fcfa(d.total)}`).join("\n")
-        }
-      />
       <StatCard label="Total des créances clients" value={fcfa(totalDebt)} tone="amber" />
+      <div data-print-section="creances-en-cours" className="space-y-3">
       {debts.length === 0 && (
         <Card>
           <p className="text-sm text-slate-400">Aucune créance en cours — tous les clients sont à jour.</p>
@@ -3100,8 +3191,19 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail, onDeletePayment, onR
           </ul>
         </Card>
       ))}
+      {debts.length > 0 && (
+        <PrintOrCopy
+          printKey="creances-en-cours"
+          getText={() =>
+            `Créances en cours — Multivers'Eau\nTotal dû : ${fcfa(totalDebt)}\n\n` +
+            debts.map((d) => `${d.client} : ${fcfa(d.total)}`).join("\n")
+          }
+        />
+      )}
+      </div>
 
       {settledDebts.length > 0 && (
+        <div data-print-section="creances-soldees">
         <Card>
           <SectionTitle icon={Check}>Créances soldées récemment</SectionTitle>
           <ul className="divide-y divide-slate-100">
@@ -3128,9 +3230,20 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail, onDeletePayment, onR
             ))}
           </ul>
         </Card>
+        <PrintOrCopy
+          printKey="creances-soldees"
+          getText={() =>
+            `Créances soldées récemment — Multivers'Eau\n\n` +
+            settledDebts
+              .map((s) => `${s.client} — ${fcfa(s.amount)} — acheté le ${s.purchaseDate}, soldée le ${s.settledDate} (${s.delay} j)`)
+              .join("\n")
+          }
+        />
+        </div>
       )}
 
       {reliability.length > 0 && (
+        <div data-print-section="classement-fiabilite">
         <Card>
           <SectionTitle icon={Users}>Classement — rapidité de paiement</SectionTitle>
           <p className="text-xs text-slate-500 mb-2">
@@ -3155,8 +3268,17 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail, onDeletePayment, onR
             ))}
           </ul>
         </Card>
+        <PrintOrCopy
+          printKey="classement-fiabilite"
+          getText={() =>
+            `Classement — rapidité de paiement — Multivers'Eau\n\n` +
+            reliability.map((c, i) => `#${i + 1} ${c.client} : ${c.avgDays} j en moyenne (${c.count} paiement(s))`).join("\n")
+          }
+        />
+        </div>
       )}
 
+      <div data-print-section="base-clients">
       <Card>
         <SectionTitle icon={Users}>Base clients (relance)</SectionTitle>
         <Input placeholder="Rechercher un client…" value={search} onChange={(e) => setSearch(e.target.value)} className="mb-2" />
@@ -3184,6 +3306,14 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail, onDeletePayment, onR
           ))}
         </ul>
       </Card>
+      <PrintOrCopy
+        printKey="base-clients"
+        getText={() =>
+          `Base clients — Multivers'Eau\n\n` +
+          clientBase.map((c) => `${c.client} : ${c.count} achat(s), ${fcfa(c.totalSpent)} au total, dernier achat le ${c.lastDate}`).join("\n")
+        }
+      />
+      </div>
 
       {payFor && (
         <Modal onClose={() => setPayFor(null)} title="Encaisser un paiement">
@@ -3252,7 +3382,7 @@ function ConfirmDeleteButton({ onConfirm, label = "Supprimer cette ligne ?", siz
 // signaler. On tente quand même, mais on propose toujours en plus une copie
 // texte garantie (à coller dans WhatsApp, Notes, etc.), qui elle fonctionne
 // partout.
-function PrintOrCopy({ getText, className = "" }) {
+function PrintOrCopy({ getText, className = "", printKey }) {
   const [status, setStatus] = useState(null); // "printing" | "copied" | "error"
 
   const tryPrint = () => {
@@ -3261,9 +3391,23 @@ function PrintOrCopy({ getText, className = "" }) {
       setTimeout(() => setStatus(null), 3500);
       return;
     }
+    const cleanup = () => {
+      document.body.removeAttribute("data-print-only");
+      document.querySelectorAll("[data-print-section]").forEach((el) => el.classList.remove("print-target-active"));
+    };
     try {
+      if (printKey) {
+        const el = document.querySelector(`[data-print-section="${printKey}"]`);
+        if (el) {
+          el.classList.add("print-target-active");
+          document.body.setAttribute("data-print-only", "1");
+        }
+      }
       window.print();
+      window.addEventListener("afterprint", cleanup, { once: true });
+      setTimeout(cleanup, 3000); // filet de sécurité si "afterprint" ne se déclenche pas
     } catch (e) {
+      cleanup();
       setStatus("unsupported");
       setTimeout(() => setStatus(null), 3500);
     }
@@ -3301,9 +3445,49 @@ function PrintOrCopy({ getText, className = "" }) {
   );
 }
 
-// Pour partager un texte (ex: citation du jour) vers WhatsApp, SMS, etc. —
-// tente le partage natif du téléphone en premier, et retombe sur une copie
-// texte garantie si ce n'est pas disponible sur ce navigateur.
+// Bouton d'impression seule, sans "Copier" — pour les sections où copier du
+// texte n'a pas de sens (un graphique par exemple). Utilise le même
+// mécanisme de "n'imprimer que cette section" que PrintOrCopy.
+function ScopedPrintButton({ printKey, label = "Imprimer ce graphique" }) {
+  const [status, setStatus] = useState(null);
+  const tryPrint = () => {
+    if (typeof window.print !== "function") {
+      setStatus("unsupported");
+      setTimeout(() => setStatus(null), 3500);
+      return;
+    }
+    const cleanup = () => {
+      document.body.removeAttribute("data-print-only");
+      document.querySelectorAll("[data-print-section]").forEach((el) => el.classList.remove("print-target-active"));
+    };
+    try {
+      const el = document.querySelector(`[data-print-section="${printKey}"]`);
+      if (el) {
+        el.classList.add("print-target-active");
+        document.body.setAttribute("data-print-only", "1");
+      }
+      window.print();
+      window.addEventListener("afterprint", cleanup, { once: true });
+      setTimeout(cleanup, 3000);
+    } catch (e) {
+      cleanup();
+      setStatus("unsupported");
+      setTimeout(() => setStatus(null), 3500);
+    }
+  };
+  return (
+    <div>
+      <Btn kind="ghost" onClick={tryPrint} className="w-full">
+        <Printer size={14} /> {label}
+      </Btn>
+      {status === "unsupported" && (
+        <p className="text-xs text-amber-600 mt-1">L'impression ne répond pas sur ce navigateur — réessaie depuis Chrome ou Brave.</p>
+      )}
+    </div>
+  );
+}
+
+
 function ShareOrCopy({ getText, title = "Multivers'Eau", className = "" }) {
   const [status, setStatus] = useState(null);
 
@@ -3383,6 +3567,7 @@ function LoansTab({ data, onAdd, onRepay, onDelete, onDeleteRepayment }) {
         </Btn>
       </Card>
 
+      <div data-print-section="prets-en-cours">
       <Card>
         <SectionTitle icon={HandCoins}>Prêts en cours</SectionTitle>
         {data.loans.length === 0 && <p className="text-sm text-slate-400">Aucun prêt enregistré.</p>}
@@ -3450,6 +3635,18 @@ function LoansTab({ data, onAdd, onRepay, onDelete, onDeleteRepayment }) {
           })}
         </ul>
       </Card>
+      {data.loans.length > 0 && (
+        <PrintOrCopy
+          printKey="prets-en-cours"
+          getText={() =>
+            `Prêts en cours — Multivers'Eau\nTotal à recevoir : ${fcfa(outstanding)}\n\n` +
+            data.loans
+              .map((l) => `${l.beneficiary} — Prêté ${fcfa(l.amount)}, Remboursé ${fcfa(repaidAmount(l))}${l.isOpening ? " (prêt de départ)" : ""}`)
+              .join("\n")
+          }
+        />
+      )}
+      </div>
 
       {repayId && (
         <Modal onClose={() => setRepayId(null)} title="Enregistrer un remboursement">
@@ -3503,13 +3700,35 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
 
   return (
     <div className="space-y-3">
+      <div data-print-section="stock-total">
+      <Card>
+        <SectionTitle icon={Boxes}>Total général — toutes marques</SectionTitle>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-slate-50 rounded-xl p-2 text-center">
+            <div className="text-xs text-slate-400 uppercase">Colis (gros)</div>
+            <div className="font-mono font-bold text-lg">{grandGros}</div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-2 text-center">
+            <div className="text-xs text-slate-400 uppercase">Unités (détail)</div>
+            <div className="font-mono font-bold text-lg">{grandDetail}</div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-2 text-center">
+            <div className="text-xs text-slate-400 uppercase">Valeur totale</div>
+            <div className="font-mono font-bold text-lg">{fcfa(totals.stockValue)}</div>
+          </div>
+        </div>
+        <p className="text-xs text-slate-400 mt-2">
+          Quantités restantes après toutes les ventes déjà enregistrées (coût au prix réel des lots FIFO).
+        </p>
+      </Card>
       <PrintOrCopy
+        printKey="stock-total"
         getText={() =>
-          `Stock — Multivers'Eau\nColis (gros) : ${grandGros}\nUnités (détail) : ${grandDetail}\nValeur totale : ${fcfa(
-            totals.stockValue
-          )}`
+          `Stock — Multivers'Eau\nColis (gros) : ${grandGros}\nUnités (détail) : ${grandDetail}\nValeur totale : ${fcfa(totals.stockValue)}`
         }
       />
+      </div>
+
       <Card>
         <SectionTitle icon={Boxes}>Total général — toutes marques</SectionTitle>
         <div className="grid grid-cols-3 gap-2">
@@ -3562,6 +3781,7 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
         </Btn>
       </Card>
 
+      <div data-print-section="stock-historique">
       <Card>
         <SectionTitle icon={Boxes}>Historique des réappros (30 derniers)</SectionTitle>
         {data.restocks.length === 0 && <p className="text-sm text-slate-400">Aucun réappro enregistré.</p>}
@@ -3582,6 +3802,22 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
           })}
         </ul>
       </Card>
+      {data.restocks.length > 0 && (
+        <PrintOrCopy
+          printKey="stock-historique"
+          getText={() =>
+            `Historique des réappros — Multivers'Eau\n\n` +
+            data.restocks
+              .slice(0, 30)
+              .map((r) => {
+                const p = productsById[r.productId];
+                return `${r.date} — ${p?.brand} ${p?.format} × ${r.qty} à ${fcfa(r.unitCost)}`;
+              })
+              .join("\n")
+          }
+        />
+      )}
+      </div>
 
       {brands.map((b) => {
         const c = getBrandColor(b);
@@ -3594,7 +3830,8 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
           return s + g.reduce((a, l) => a + l.qty * l.unitCost, 0) + de.reduce((a, l) => a + l.qty * l.unitCost, 0);
         }, 0);
         return (
-          <Card key={b}>
+          <div key={b} data-print-section={`stock-${b}`}>
+          <Card>
             <div className={`flex items-center gap-2 mb-2`}>
               <span className={`w-2.5 h-2.5 rounded-full ${c.dot}`} />
               <h3 className="font-bold text-sm">{b}</h3>
@@ -3669,6 +3906,21 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
               </tfoot>
             </table>
           </Card>
+          <PrintOrCopy
+            printKey={`stock-${b}`}
+            getText={() =>
+              `Stock ${b} — Multivers'Eau\n` +
+              `Total : Gros ${brandGros}, Détail ${brandDetail}, Valeur ${fcfa(brandVal)}\n\n` +
+              rows
+                .map((p) => {
+                  const g = lotsQty(data.lots[p.id]?.gros);
+                  const de = lotsQty(data.lots[p.id]?.detail);
+                  return `${p.format} : Gros ${g}, Détail ${de}`;
+                })
+                .join("\n")
+            }
+          />
+          </div>
         );
       })}
     </div>
@@ -3698,12 +3950,6 @@ function ExpensesTab({ data, totals, onAdd, onDelete }) {
         <StatCard label="Dépenses ce mois-ci" value={fcfa(monthTotal)} tone="amber" />
         <StatCard label="Total cumulé" value={fcfa(totals.expensesTotal)} tone="amber" />
       </div>
-      <PrintOrCopy
-        getText={() =>
-          `Dépenses — Multivers'Eau\nCe mois-ci : ${fcfa(monthTotal)}\nTotal cumulé : ${fcfa(totals.expensesTotal)}\n\n` +
-          data.expenses.map((e) => `${e.date} — ${e.category}${e.label ? " (" + e.label + ")" : ""} : ${fcfa(e.amount)}`).join("\n")
-        }
-      />
 
       <Card>
         <SectionTitle icon={Receipt}>Nouvelle dépense</SectionTitle>
@@ -3728,6 +3974,7 @@ function ExpensesTab({ data, totals, onAdd, onDelete }) {
         </Btn>
       </Card>
 
+      <div data-print-section="historique-depenses">
       <Card>
         <SectionTitle icon={Receipt}>Historique des dépenses</SectionTitle>
         {data.expenses.length === 0 && <p className="text-sm text-slate-400">Aucune dépense enregistrée.</p>}
@@ -3749,6 +3996,16 @@ function ExpensesTab({ data, totals, onAdd, onDelete }) {
           ))}
         </ul>
       </Card>
+      {data.expenses.length > 0 && (
+        <PrintOrCopy
+          printKey="historique-depenses"
+          getText={() =>
+            `Dépenses — Multivers'Eau\nCe mois-ci : ${fcfa(monthTotal)}\nTotal cumulé : ${fcfa(totals.expensesTotal)}\n\n` +
+            data.expenses.map((e) => `${e.date} — ${e.category}${e.label ? " (" + e.label + ")" : ""} : ${fcfa(e.amount)}`).join("\n")
+          }
+        />
+      )}
+      </div>
     </div>
   );
 }
@@ -3823,19 +4080,8 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
         <StatCard label="Coût des bouteilles rachetées" value={fcfa(collectionCost)} tone="amber" />
         <StatCard label="Marge nette recyclage" value={fcfa(netMargin)} tone={netMargin >= 0 ? "teal" : "rose"} />
       </div>
-      <PrintOrCopy
-        getText={() =>
-          `Recyclage — Multivers'Eau\n` +
-          `Bouteilles collectées : ${totals.recyclingCollected}\nBouteilles vendues : ${totals.recyclingSoldQty}\nStock actuel : ${totals.recyclingStock}\nRevenu cumulé : ${fcfa(
-            totals.recyclingRevenue
-          )}\nCoût des rachats : ${fcfa(collectionCost)}\nMarge nette : ${fcfa(netMargin)}\n\n` +
-          Object.entries(stockByBucket)
-            .filter(([, q]) => q !== 0)
-            .map(([key, q]) => `${bucketLabel(key)} : ${q}`)
-            .join("\n")
-        }
-      />
 
+      <div data-print-section="stock-contenance">
       <Card>
         <SectionTitle icon={Recycle}>Stock disponible par contenance</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
@@ -3856,6 +4102,20 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
             ))}
         </ul>
       </Card>
+      <PrintOrCopy
+        printKey="stock-contenance"
+        getText={() =>
+          `Recyclage — Stock par contenance — Multivers'Eau\n` +
+          `Bouteilles collectées : ${totals.recyclingCollected}\nBouteilles vendues : ${totals.recyclingSoldQty}\n` +
+          `Stock actuel : ${totals.recyclingStock}\nRevenu cumulé : ${fcfa(totals.recyclingRevenue)}\n` +
+          `Coût des rachats : ${fcfa(collectionCost)}\nMarge nette : ${fcfa(netMargin)}\n\n` +
+          Object.entries(stockByBucket)
+            .filter(([, q]) => q !== 0)
+            .map(([key, q]) => `${bucketLabel(key)} : ${q}`)
+            .join("\n")
+        }
+      />
+      </div>
 
       <Card>
         <SectionTitle icon={Recycle}>Collecte de bouteilles vides</SectionTitle>
@@ -3920,6 +4180,7 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
         </Btn>
       </Card>
 
+      <div data-print-section="historique-collectes">
       <Card>
         <SectionTitle icon={Recycle}>Historique des collectes</SectionTitle>
         {data.recyclingCollections.length === 0 && <p className="text-sm text-slate-400">Aucune collecte enregistrée.</p>}
@@ -3937,7 +4198,20 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
           ))}
         </ul>
       </Card>
+      {data.recyclingCollections.length > 0 && (
+        <PrintOrCopy
+          printKey="historique-collectes"
+          getText={() =>
+            `Historique des collectes — Multivers'Eau\n\n` +
+            data.recyclingCollections
+              .map((c) => `${c.date} — ${productLabel(c.productId)} — ${c.client || "Client anonyme"} : ${c.quantity} bouteille(s)${c.unitCost > 0 ? " — payé " + fcfa(c.quantity * c.unitCost) : " (gratuit)"}`)
+              .join("\n")
+          }
+        />
+      )}
+      </div>
 
+      <div data-print-section="historique-ventes-recyclage">
       <Card>
         <SectionTitle icon={Recycle}>Historique des ventes</SectionTitle>
         {data.recyclingSales.length === 0 && <p className="text-sm text-slate-400">Aucune vente enregistrée.</p>}
@@ -3953,6 +4227,18 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
           ))}
         </ul>
       </Card>
+      {data.recyclingSales.length > 0 && (
+        <PrintOrCopy
+          printKey="historique-ventes-recyclage"
+          getText={() =>
+            `Historique des ventes de recyclage — Multivers'Eau\n\n` +
+            data.recyclingSales
+              .map((s) => `${s.date} — ${productLabel(s.productId)} — ${s.buyer || "Acheteur"} : ${s.quantity} × ${fcfa(s.unitPrice)} = ${fcfa(s.quantity * s.unitPrice)}`)
+              .join("\n")
+          }
+        />
+      )}
+      </div>
     </div>
   );
 }
@@ -3995,16 +4281,6 @@ function BalanceTab({
 
   return (
     <div className="space-y-3">
-      <PrintOrCopy
-        getText={() =>
-          `Bilan — Multivers'Eau\n` +
-          `Total actifs : ${fcfa(totals.assets)}\n` +
-          `Total passifs : ${fcfa(totals.liabilitiesTotal)}\n` +
-          `Valeur nette : ${fcfa(totals.netWorth)}\n` +
-          `Objectif (dette investisseur) : ${fcfa(totals.startingCapital)}\n` +
-          `${totals.netResult >= 0 ? "Excédent" : "Reste à générer"} : ${fcfa(Math.abs(totals.netResult))}`
-        }
-      />
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Total actifs" value={fcfa(totals.assets)} />
         <StatCard
@@ -4014,6 +4290,7 @@ function BalanceTab({
         />
       </div>
 
+      <div data-print-section="objectif">
       <Card>
         <SectionTitle icon={PiggyBank}>Objectif — dette envers l'investisseur</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
@@ -4036,7 +4313,17 @@ function BalanceTab({
           </Btn>
         </div>
       </Card>
+      <PrintOrCopy
+        printKey="objectif"
+        getText={() =>
+          `Objectif — dette investisseur — Multivers'Eau\n` +
+          `Montant à atteindre : ${fcfa(totals.startingCapital)}\nValeur nette actuelle : ${fcfa(totals.netWorth)}\n` +
+          `${totals.netResult >= 0 ? "Excédent réel" : "Reste à générer"} : ${fcfa(Math.abs(totals.netResult))}`
+        }
+      />
+      </div>
 
+      <div data-print-section="remuneration-gerant">
       <Card>
         <SectionTitle icon={HandCoins}>Rémunération du gérant</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
@@ -4066,7 +4353,16 @@ function BalanceTab({
           <Plus size={16} /> Enregistrer un retrait
         </Btn>
       </Card>
+      <PrintOrCopy
+        printKey="remuneration-gerant"
+        getText={() =>
+          `Rémunération du gérant — Multivers'Eau\nTotal versé : ${fcfa(totals.withdrawalsTotal)}\n\n` +
+          data.withdrawals.map((w) => `${w.date} : ${fcfa(w.amount)}${w.note ? " (" + w.note + ")" : ""}`).join("\n")
+        }
+      />
+      </div>
 
+      <div data-print-section="tresorerie-depart">
       <Card>
         <SectionTitle icon={Wallet}>Trésorerie de départ</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
@@ -4079,7 +4375,13 @@ function BalanceTab({
           </Btn>
         </div>
       </Card>
+      <PrintOrCopy
+        printKey="tresorerie-depart"
+        getText={() => `Trésorerie de départ — Multivers'Eau\nMontant : ${fcfa(data.meta.initialCash)} (au ${data.meta.startDate})`}
+      />
+      </div>
 
+      <div data-print-section="actifs">
       <Card>
         <SectionTitle icon={PiggyBank}>Actifs</SectionTitle>
         <Row label="Trésorerie disponible" value={fcfa(totals.treasury)} />
@@ -4088,7 +4390,16 @@ function BalanceTab({
         <Row label="Prêts en cours (à recevoir)" value={fcfa(totals.loansOutstanding)} />
         <Row label="Total actifs" value={fcfa(totals.assets)} bold />
       </Card>
+      <PrintOrCopy
+        printKey="actifs"
+        getText={() =>
+          `Actifs — Multivers'Eau\nTrésorerie : ${fcfa(totals.treasury)}\nStock : ${fcfa(totals.stockValue)}\n` +
+          `Créances : ${fcfa(totals.receivables)}\nPrêts en cours : ${fcfa(totals.loansOutstanding)}\nTotal actifs : ${fcfa(totals.assets)}`
+        }
+      />
+      </div>
 
+      <div data-print-section="tpu">
       <Card>
         <SectionTitle icon={Receipt}>Provision fiscale — TPU estimée</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
@@ -4105,7 +4416,16 @@ function BalanceTab({
           été réellement payé.
         </p>
       </Card>
+      <PrintOrCopy
+        printKey="tpu"
+        getText={() =>
+          `Provision fiscale — TPU estimée — Multivers'Eau\nCA de l'année : ${fcfa(totals.year.revenue)}\nTaux : 2,5 %\n` +
+          `TPU estimée : ${fcfa(totals.tpuEstimate)}`
+        }
+      />
+      </div>
 
+      <div data-print-section="passifs">
       <Card>
         <SectionTitle icon={AlertCircle}>Passifs (dettes de l'entreprise)</SectionTitle>
         {data.liabilities.length === 0 && <p className="text-sm text-slate-400 mb-2">Aucun passif déclaré.</p>}
@@ -4128,14 +4448,34 @@ function BalanceTab({
           <Plus size={16} /> Ajouter un passif
         </Btn>
       </Card>
+      {data.liabilities.length > 0 && (
+        <PrintOrCopy
+          printKey="passifs"
+          getText={() =>
+            `Passifs — Multivers'Eau\nTotal : ${fcfa(totals.liabilitiesTotal)}\n\n` +
+            data.liabilities.map((l) => `${l.label} : ${fcfa(l.amount)}`).join("\n")
+          }
+        />
+      )}
+      </div>
 
+      <div data-print-section="resume">
       <Card>
         <Row label="Total actifs" value={fcfa(totals.assets)} />
         <Row label="Total passifs" value={fcfa(totals.liabilitiesTotal)} />
         <Row label="Provision TPU" value={fcfa(totals.tpuEstimate)} />
         <Row label="Valeur nette (capital)" value={fcfa(totals.netWorth)} bold tone={totals.netWorth >= 0 ? "teal" : "rose"} />
       </Card>
+      <PrintOrCopy
+        printKey="resume"
+        getText={() =>
+          `Résumé du Bilan — Multivers'Eau\nTotal actifs : ${fcfa(totals.assets)}\nTotal passifs : ${fcfa(totals.liabilitiesTotal)}\n` +
+          `Provision TPU : ${fcfa(totals.tpuEstimate)}\nValeur nette : ${fcfa(totals.netWorth)}`
+        }
+      />
+      </div>
 
+      <div data-print-section="hors-bilan">
       <Card>
         <SectionTitle icon={AlertCircle}>Hors bilan — informations personnelles</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
@@ -4165,6 +4505,15 @@ function BalanceTab({
           <Plus size={16} /> Ajouter une note
         </Btn>
       </Card>
+      {data.personalNotes.length > 0 && (
+        <PrintOrCopy
+          printKey="hors-bilan"
+          getText={() =>
+            `Hors bilan — Multivers'Eau\n\n` + data.personalNotes.map((n) => `${n.label} (${n.date}) : ${fcfa(n.amount)}`).join("\n")
+          }
+        />
+      )}
+      </div>
     </div>
   );
 }
