@@ -1740,10 +1740,11 @@ export default function App({ uid: currentUid, onSignOut }) {
           .no-print, header, nav, input, select, button, textarea { display: none !important; }
           body { background: white !important; }
           /* Impression ciblée : quand une seule sous-rubrique est choisie
-             (bouton "Imprimer" d'une carte précise), on masque toutes les
-             autres et on ne garde que celle-là. */
-          body[data-print-only] [data-print-section] { display: none !important; }
-          body[data-print-only] [data-print-section].print-target-active { display: block !important; }
+             (bouton "Imprimer" d'une carte précise), on masque TOUT le
+             contenu de l'onglet (y compris les formulaires et cartes non
+             encadrées) et on ne garde que la section ciblée. */
+          body[data-print-only] main > div > * { display: none !important; }
+          body[data-print-only] main > div > .print-target-active { display: block !important; }
         }
         /* Les boutons natifs "effacer" et "incrémenter" de Chrome/Edge sur les
            champs date ont une zone cliquable qui peut déborder légèrement sur
@@ -2293,6 +2294,7 @@ function Dashboard({ data, totals, productsById }) {
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Accueil" />
       {exportOverdue && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700 flex items-center gap-2">
           <AlertCircle size={14} className="shrink-0" />
@@ -2678,6 +2680,7 @@ function SalesTab({ data, productsById, onAdd, onBatchAdd, onDelete }) {
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Ventes" />
       <Card>
         <SectionTitle icon={ShoppingCart}>Nouvelle vente en gros</SectionTitle>
         <div className="grid grid-cols-2 gap-2 mb-2">
@@ -2841,6 +2844,7 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Détail" />
       <StatCard
         label="Capital immobilisé en détail"
         value={fcfa(totals.stockValueDetail)}
@@ -3138,6 +3142,7 @@ function ClientsTab({ data, totals, onPaySale, onPayDetail, onDeletePayment, onR
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Clients" />
       <StatCard label="Total des créances clients" value={fcfa(totalDebt)} tone="amber" />
       <div data-print-section="creances-en-cours" className="space-y-3">
       {debts.length === 0 && (
@@ -3487,6 +3492,38 @@ function ScopedPrintButton({ printKey, label = "Imprimer ce graphique" }) {
   );
 }
 
+// Imprime tout l'onglet en cours, sans se limiter à une seule section —
+// nettoie d'abord tout ciblage de section resté actif (au cas où), pour
+// garantir un vrai print complet.
+function PrintWholeTab({ label = "Imprimer tout l'onglet" }) {
+  const [status, setStatus] = useState(null);
+  const tryPrint = () => {
+    document.body.removeAttribute("data-print-only");
+    document.querySelectorAll(".print-target-active").forEach((el) => el.classList.remove("print-target-active"));
+    if (typeof window.print !== "function") {
+      setStatus("unsupported");
+      setTimeout(() => setStatus(null), 3500);
+      return;
+    }
+    try {
+      window.print();
+    } catch (e) {
+      setStatus("unsupported");
+      setTimeout(() => setStatus(null), 3500);
+    }
+  };
+  return (
+    <div className="no-print">
+      <Btn kind="ghost" onClick={tryPrint} className="w-full">
+        <Printer size={14} /> {label}
+      </Btn>
+      {status === "unsupported" && (
+        <p className="text-xs text-amber-600 mt-1">L'impression ne répond pas sur ce navigateur — réessaie depuis Chrome ou Brave.</p>
+      )}
+    </div>
+  );
+}
+
 
 function ShareOrCopy({ getText, title = "Multivers'Eau", className = "" }) {
   const [status, setStatus] = useState(null);
@@ -3539,6 +3576,7 @@ function LoansTab({ data, onAdd, onRepay, onDelete, onDeleteRepayment }) {
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Prêts" />
       <StatCard label="Prêts en cours (à recevoir)" value={fcfa(outstanding)} tone="amber" />
       <Card>
         <SectionTitle icon={HandCoins}>Nouveau prêt effectué</SectionTitle>
@@ -3700,6 +3738,7 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Stock" />
       <div data-print-section="stock-total">
       <Card>
         <SectionTitle icon={Boxes}>Total général — toutes marques</SectionTitle>
@@ -3728,27 +3767,6 @@ function StockTab({ data, productsById, totals, onRestock, onDeleteRestock }) {
         }
       />
       </div>
-
-      <Card>
-        <SectionTitle icon={Boxes}>Total général — toutes marques</SectionTitle>
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-slate-50 rounded-xl p-2 text-center">
-            <div className="text-xs text-slate-400 uppercase">Colis (gros)</div>
-            <div className="font-mono font-bold text-lg">{grandGros}</div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-2 text-center">
-            <div className="text-xs text-slate-400 uppercase">Unités (détail)</div>
-            <div className="font-mono font-bold text-lg">{grandDetail}</div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-2 text-center">
-            <div className="text-xs text-slate-400 uppercase">Valeur totale</div>
-            <div className="font-mono font-bold text-lg">{fcfa(totals.stockValue)}</div>
-          </div>
-        </div>
-        <p className="text-xs text-slate-400 mt-2">
-          Quantités restantes après toutes les ventes déjà enregistrées (coût au prix réel des lots FIFO).
-        </p>
-      </Card>
 
       <Card>
         <SectionTitle icon={Boxes}>Réapprovisionnement (achat fournisseur)</SectionTitle>
@@ -3946,6 +3964,7 @@ function ExpensesTab({ data, totals, onAdd, onDelete }) {
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Dépenses" />
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Dépenses ce mois-ci" value={fcfa(monthTotal)} tone="amber" />
         <StatCard label="Total cumulé" value={fcfa(totals.expensesTotal)} tone="amber" />
@@ -4074,6 +4093,7 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Recyclage" />
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Bouteilles vides en stock" value={totals.recyclingStock} />
         <StatCard label="Revenu recyclage cumulé" value={fcfa(totals.recyclingRevenue)} tone="teal" />
@@ -4281,6 +4301,7 @@ function BalanceTab({
 
   return (
     <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Bilan" />
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Total actifs" value={fcfa(totals.assets)} />
         <StatCard
