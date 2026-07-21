@@ -933,6 +933,16 @@ function bumpLotSeq(meta, productId, newSeq) {
   return { ...meta, lotSeqByProduct: { ...(meta.lotSeqByProduct || {}), [productId]: newSeq } };
 }
 
+// Quand une action est complètement annulée (colis redevenu intact, réappro
+// supprimé sans avoir été touché), on rend le numéro qu'elle avait pris —
+// mais seulement s'il s'agit bien du DERNIER numéro attribué à ce produit,
+// pour ne jamais créer de doublon avec un lot plus récent encore existant.
+function releaseLotNoIfLast(meta, productId, lotNo) {
+  const current = (meta.lotSeqByProduct || {})[productId];
+  if (current === lotNo) return bumpLotSeq(meta, productId, lotNo - 1);
+  return meta;
+}
+
 function lotsQty(lots) {
   return (lots || []).reduce((s, l) => s + l.qty, 0);
 }
@@ -1476,6 +1486,10 @@ export default function App({ uid: currentUid, onSignOut }) {
       meta = bumpLotSeq(meta, o.productId, lotNo);
       updatedGros = [...grosLots, { id: uid(), date: o.date, qty: 1, originalQty: 1, unitCost: lot.unitCost * p.units, lotNo }];
     }
+    // Le colis redevient exactement comme s'il n'avait jamais été ouvert —
+    // si son numéro était le dernier attribué à ce produit, on le rend pour
+    // que la prochaine ouverture le reprenne, au lieu de sauter un cran.
+    meta = releaseLotNoIfLast(meta, o.productId, lot.lotNo);
     return {
       ...d,
       meta,
@@ -1575,6 +1589,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     }
     persist({
       ...data,
+      meta: releaseLotNoIfLast(data.meta, r.productId, lot.lotNo),
       restocks: data.restocks.filter((x) => x.id !== id),
       lots: { ...data.lots, [r.productId]: { ...data.lots[r.productId], gros: grosLots.filter((l) => l.id !== r.lotId) } },
     });
@@ -1817,6 +1832,36 @@ export default function App({ uid: currentUid, onSignOut }) {
     persist({ ...data, products: data.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
   };
 
+  // Réglage manuel du compteur de lots d'un produit — utile pour corriger
+  // une numérotation qui a "sauté" (ex : après avoir annulé plusieurs
+  // ouvertures/ventes de suite). La valeur saisie est le DERNIER numéro
+  // utilisé ; le prochain lot de ce produit prendra valeur+1.
+  const setLotSeq = (productId, value) => {
+    persist({ ...data, meta: bumpLotSeq(data.meta, productId, Number(value) || 0) });
+    showToast("Compteur de lots mis à jour");
+  };
+
+  // Suppression manuelle d'un lot depuis le registre complet — même sécurité
+  // que partout ailleurs (uniquement si rien n'a encore été vendu dessus).
+  // Nettoie aussi tout réappro/ouverture qui pointerait dessus (normalement
+  // aucun pour un vrai lot fantôme), et rend son numéro s'il était le dernier.
+  const deleteLotManually = (productId, kind, lotId) => {
+    const lots = data.lots[productId]?.[kind] || [];
+    const lot = lots.find((l) => l.id === lotId);
+    if (!lot || lot.qty !== lot.originalQty) {
+      showToast("Impossible : ce lot a déjà été partiellement vendu", "error");
+      return;
+    }
+    persist({
+      ...data,
+      meta: releaseLotNoIfLast(data.meta, productId, lot.lotNo),
+      restocks: data.restocks.filter((r) => r.lotId !== lotId),
+      openings: data.openings.filter((o) => o.lotId !== lotId),
+      lots: { ...data.lots, [productId]: { ...data.lots[productId], [kind]: lots.filter((l) => l.id !== lotId) } },
+    });
+    showToast("Lot supprimé");
+  };
+
   // Nouvelle marque ou nouveau format ajouté manuellement — démarre avec un
   // stock vide (à réapprovisionner ensuite normalement).
   const addProduct = (p) => {
@@ -1979,7 +2024,7 @@ export default function App({ uid: currentUid, onSignOut }) {
             onDeletePersonalNote={deletePersonalNote}
           />
         )}
-        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} />}
+        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} onSetLotSeq={setLotSeq} onDeleteLot={deleteLotManually} />}
       </main>
 
       <nav
@@ -4763,13 +4808,15 @@ function ProgressBar({ value, target }) {
 
 /* -------------------------------- Paramètres --------------------------------- */
 
-function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported }) {
+function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSetLotSeq, onDeleteLot }) {
   const brands = brandsOf(data.products);
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pastedJson, setPastedJson] = useState("");
+  const [lotSeqEdits, setLotSeqEdits] = useState({});
+  const [showAllLots, setShowAllLots] = useState(false);
   const [newProduct, setNewProduct] = useState({
     brand: "",
     customBrand: "",
@@ -5006,6 +5053,66 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported }) {
       </Card>
 
       <Card>
+        <div className="flex items-center justify-between mb-2">
+          <SectionTitle icon={Boxes}>Registre de tous les lots</SectionTitle>
+          <button type="button" onClick={() => setShowAllLots((v) => !v)} className="text-xs font-semibold text-teal-700">
+            {showAllLots ? "Masquer" : "Afficher"}
+          </button>
+        </div>
+        <p className="text-xs text-slate-500 mb-2">
+          Tous les lots gros et détail, produit par produit. Un lot marqué <b className="text-amber-600">⚠ sans origine</b> n'a aucun
+          réappro ni ouverture qui lui correspond — souvent un reste d'un ancien bug. Suppression possible uniquement si rien n'a
+          encore été vendu dessus.
+        </p>
+        {showAllLots && (
+          <div className="space-y-3 mt-2">
+            {data.products.map((p) => {
+              const gros = (data.lots[p.id]?.gros || []).map((l) => ({ ...l, kind: "gros" }));
+              const detail = (data.lots[p.id]?.detail || []).map((l) => ({ ...l, kind: "detail" }));
+              const all = sortLots([...gros, ...detail]);
+              if (all.length === 0) return null;
+              return (
+                <div key={p.id}>
+                  <div className="text-xs font-bold text-slate-600 mb-1">
+                    {p.brand} {p.format}
+                  </div>
+                  <ul className="divide-y divide-slate-100">
+                    {all.map((l) => {
+                      const isOrphan =
+                        !data.restocks.some((r) => r.lotId === l.id) &&
+                        !data.openings.some((o) => o.lotId === l.id) &&
+                        l.lotNo !== 1; // lotNo 1 = stock de départ, normal de n'avoir aucun réappro/ouverture
+                      const untouched = l.qty === l.originalQty;
+                      return (
+                        <li key={l.id} className="py-1.5 flex items-center justify-between text-xs">
+                          <span className="text-slate-600">
+                            {l.kind === "gros" ? "Gros" : "Détail"} — Lot #{l.lotNo} — {new Date(l.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} —{" "}
+                            {l.qty}/{l.originalQty}
+                            {isOrphan && <span className="text-amber-600 font-semibold"> ⚠ sans origine</span>}
+                          </span>
+                          {untouched ? (
+                            <ConfirmDeleteButton
+                              size={12}
+                              onConfirm={() => onDeleteLot(p.id, l.kind, l.id)}
+                              label={`Supprimer ce lot (${l.kind === "gros" ? "Gros" : "Détail"} #${l.lotNo}, ${l.qty} unité(s)) ? Cette quantité sera retirée du stock.`}
+                            />
+                          ) : (
+                            <span className="text-slate-300" title="Déjà partiellement vendu — suppression impossible">
+                              —
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      <Card>
         <SectionTitle icon={Settings}>Prix par article</SectionTitle>
         <p className="text-xs text-slate-500">
           Ces prix ne sont que des <b>valeurs par défaut</b> — modifiables librement au moment de chaque vente. Le "prix d'achat de
@@ -5039,6 +5146,29 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported }) {
                       <label className="text-xs text-slate-400">Vente détail (/u)</label>
                       <Input type="number" value={p.retailPrice} onChange={(e) => onUpdate(p.id, { retailPrice: Number(e.target.value) })} />
                     </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs items-end mt-2 pt-2 border-t border-slate-100">
+                    <div className="col-span-2">
+                      <label className="text-xs text-slate-400">
+                        Compteur de lots (dernier n° utilisé — le prochain sera n°+1)
+                      </label>
+                      <Input
+                        type="number"
+                        placeholder={String((data.meta.lotSeqByProduct || {})[p.id] || 0)}
+                        value={lotSeqEdits[p.id] ?? ""}
+                        onChange={(e) => setLotSeqEdits({ ...lotSeqEdits, [p.id]: e.target.value })}
+                      />
+                    </div>
+                    <Btn
+                      kind="ghost"
+                      onClick={() => {
+                        if (lotSeqEdits[p.id] === undefined || lotSeqEdits[p.id] === "") return;
+                        onSetLotSeq(p.id, lotSeqEdits[p.id]);
+                        setLotSeqEdits({ ...lotSeqEdits, [p.id]: "" });
+                      }}
+                    >
+                      Régler
+                    </Btn>
                   </div>
                 </div>
               ))}
