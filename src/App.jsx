@@ -948,19 +948,41 @@ function consumeFifo(lots, qty) {
   let remaining = qty;
   let totalCost = 0;
   const updated = [];
+  const consumedFrom = [];
   for (const lot of sorted) {
     if (remaining <= 0) {
       updated.push(lot);
       continue;
     }
     const take = Math.min(lot.qty, remaining);
-    totalCost += take * lot.unitCost;
-    remaining -= take;
+    if (take > 0) {
+      totalCost += take * lot.unitCost;
+      remaining -= take;
+      consumedFrom.push({ id: lot.id, date: lot.date, originalQty: lot.originalQty, unitCost: lot.unitCost, lotNo: lot.lotNo, qtyTaken: take });
+    }
     const rest = lot.qty - take;
     if (rest > 0) updated.push({ ...lot, qty: rest });
   }
   if (remaining > 0) return { ok: false };
-  return { ok: true, lots: updated, totalCost, avgCost: qty > 0 ? totalCost / qty : 0 };
+  return { ok: true, lots: updated, totalCost, avgCost: qty > 0 ? totalCost / qty : 0, consumedFrom };
+}
+
+// Restitue une consommation FIFO exactement sur les lots d'origine (par id) —
+// s'ils existent encore, on ajoute la quantité (plafonnée à leur capacité de
+// départ) ; s'ils ont été entièrement consommés et donc retirés du tableau,
+// on les recrée avec la quantité rendue. Ainsi un lot ne reste jamais bloqué
+// après suppression d'une vente ou d'une ouverture qui l'avait consommé.
+function restoreToLots(currentLots, consumedFrom) {
+  let lots = [...(currentLots || [])];
+  (consumedFrom || []).forEach((c) => {
+    const idx = lots.findIndex((l) => l.id === c.id);
+    if (idx >= 0) {
+      lots[idx] = { ...lots[idx], qty: Math.min(lots[idx].originalQty, lots[idx].qty + c.qtyTaken) };
+    } else {
+      lots.push({ id: c.id, date: c.date, originalQty: c.originalQty, unitCost: c.unitCost, lotNo: c.lotNo, qty: Math.min(c.originalQty, c.qtyTaken) });
+    }
+  });
+  return lots;
 }
 
 function defaultData() {
@@ -1235,6 +1257,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       mode: sale.mode,
       paidAmount: sale.mode === "cash" ? total : 0,
       payments: sale.mode === "cash" ? [{ id: uid(), date: sale.date, amount: total }] : [],
+      consumedFrom: res.consumedFrom,
     };
     const next = {
       ...data,
@@ -1272,6 +1295,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         mode: sale.mode,
         paidAmount: sale.mode === "cash" ? total : 0,
         payments: sale.mode === "cash" ? [{ id: uid(), date: sale.date, amount: total }] : [],
+        consumedFrom: res.consumedFrom,
       };
       working = {
         ...working,
@@ -1317,7 +1341,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         [productId]: { gros: res.lots, detail: [...detailLots, newDetailLot] },
       },
       openings: [
-        { id: uid(), date: openingDate, productId, qty: 1, lotId: newDetailLot.id, sourceLotId },
+        { id: uid(), date: openingDate, productId, qty: 1, lotId: newDetailLot.id, sourceLotId, consumedFrom: res.consumedFrom },
         ...data.openings,
       ],
     };
@@ -1344,6 +1368,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       mode: sale.mode,
       paidAmount: sale.mode === "cash" ? total : 0,
       payments: sale.mode === "cash" ? [{ id: uid(), date: sale.date, amount: total }] : [],
+      consumedFrom: res.consumedFrom,
     };
     const next = {
       ...data,
@@ -1383,31 +1408,90 @@ export default function App({ uid: currentUid, onSignOut }) {
   const deleteSale = (id) => {
     const sale = data.sales.find((s) => s.id === id);
     if (!sale) return;
-    const lotNo = (data.meta.lotSeq || 0) + 1;
-    const restoredLot = { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo };
     const grosLots = data.lots[sale.productId]?.gros || [];
+    let updatedGros;
+    let lotSeq = data.meta.lotSeq || 0;
+    if (sale.consumedFrom) {
+      // Ventes récentes : on sait exactement de quel(s) lot(s) ça vient — on
+      // restitue dessus, quitte à les recréer s'ils avaient été épuisés.
+      updatedGros = restoreToLots(grosLots, sale.consumedFrom);
+    } else {
+      // Anciennes ventes (avant ce correctif) : pas d'historique de
+      // consommation précis, on retombe sur l'ancien comportement (un
+      // nouveau lot séparé) plutôt que de deviner.
+      lotSeq += 1;
+      updatedGros = [...grosLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo: lotSeq }];
+    }
     persist({
       ...data,
-      meta: { ...data.meta, lotSeq: lotNo },
+      meta: { ...data.meta, lotSeq },
       sales: data.sales.filter((s) => s.id !== id),
-      lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], gros: [...grosLots, restoredLot] } },
+      lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], gros: updatedGros } },
     });
     showToast("Vente supprimée, stock restitué");
+  };
+
+  // Repasse un colis détail en gros s'il est redevenu parfaitement intact
+  // (plus aucune unité vendue dessus) — utilisé à la fois pour l'annulation
+  // manuelle d'une ouverture et pour la bascule automatique quand supprimer
+  // une vente rend un lot de nouveau complet. Ne fait rien (renvoie les
+  // données inchangées) si le lot n'existe plus ou n'est pas intact.
+  const revertOpeningIfIntact = (d, openingId) => {
+    const o = d.openings.find((x) => x.id === openingId);
+    if (!o) return d;
+    const detailLots = d.lots[o.productId]?.detail || [];
+    const lot = detailLots.find((l) => l.id === o.lotId);
+    if (!lot || lot.qty !== lot.originalQty) return d;
+    const p = productsById[o.productId];
+    const grosLots = d.lots[o.productId]?.gros || [];
+    let updatedGros;
+    let lotSeq = d.meta.lotSeq || 0;
+    if (o.consumedFrom) {
+      updatedGros = restoreToLots(grosLots, o.consumedFrom);
+    } else {
+      lotSeq += 1;
+      updatedGros = [...grosLots, { id: uid(), date: o.date, qty: 1, originalQty: 1, unitCost: lot.unitCost * p.units, lotNo: lotSeq }];
+    }
+    return {
+      ...d,
+      meta: { ...d.meta, lotSeq },
+      openings: d.openings.filter((x) => x.id !== openingId),
+      lots: { ...d.lots, [o.productId]: { gros: updatedGros, detail: detailLots.filter((l) => l.id !== o.lotId) } },
+    };
   };
 
   const deleteDetailSale = (id) => {
     const sale = data.detailSales.find((s) => s.id === id);
     if (!sale) return;
-    const lotNo = (data.meta.lotSeq || 0) + 1;
-    const restoredLot = { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo };
     const detailLots = data.lots[sale.productId]?.detail || [];
-    persist({
+    let updatedDetail;
+    let lotSeq = data.meta.lotSeq || 0;
+    if (sale.consumedFrom) {
+      updatedDetail = restoreToLots(detailLots, sale.consumedFrom);
+    } else {
+      lotSeq += 1;
+      updatedDetail = [...detailLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo: lotSeq }];
+    }
+    let next = {
       ...data,
-      meta: { ...data.meta, lotSeq: lotNo },
+      meta: { ...data.meta, lotSeq },
       detailSales: data.detailSales.filter((s) => s.id !== id),
-      lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], detail: [...detailLots, restoredLot] } },
+      lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], detail: updatedDetail } },
+    };
+    // Si ça rend un colis ouvert de nouveau intact (ex : bouteille reprise
+    // au client, vente annulée), on le repasse automatiquement en gros —
+    // exactement comme si ce colis n'avait jamais été ouvert.
+    let autoReverted = false;
+    (sale.consumedFrom || []).forEach((c) => {
+      const opening = next.openings.find((o) => o.lotId === c.id);
+      if (opening) {
+        const before = next;
+        next = revertOpeningIfIntact(next, opening.id);
+        if (next !== before) autoReverted = true;
+      }
     });
-    showToast("Vente au détail supprimée, stock restitué");
+    persist(next);
+    showToast(autoReverted ? "Vente supprimée — colis de nouveau intact, restitué automatiquement en gros" : "Vente au détail supprimée, stock restitué");
   };
 
   // Un réappro n'est supprimable que si le lot qu'il a créé est encore
@@ -1441,30 +1525,23 @@ export default function App({ uid: currentUid, onSignOut }) {
       showToast("Impossible : des unités de ce colis ont déjà été vendues", "error");
       return;
     }
-    const p = productsById[o.productId];
-    const lotNo = (data.meta.lotSeq || 0) + 1;
-    const restoredGrosLot = {
-      id: uid(),
-      date: o.date,
-      qty: 1,
-      originalQty: 1,
-      unitCost: lot.unitCost * p.units,
-      lotNo,
-    };
-    const grosLots = data.lots[o.productId]?.gros || [];
-    persist({
-      ...data,
-      meta: { ...data.meta, lotSeq: lotNo },
-      openings: data.openings.filter((x) => x.id !== id),
-      lots: {
-        ...data.lots,
-        [o.productId]: {
-          gros: [...grosLots, restoredGrosLot],
-          detail: detailLots.filter((l) => l.id !== o.lotId),
-        },
-      },
-    });
+    persist(revertOpeningIfIntact(data, id));
     showToast("Ouverture annulée, colis restitué en gros");
+  };
+
+  // Débouclage manuel pour les ouvertures restées bloquées (à cause de
+  // l'ancien bug, ou simplement parce que des unités ont réellement été
+  // vendues) : on arrête juste le SUIVI de cette ouverture — elle disparaît
+  // de "colis ouverts en cours". On ne touche JAMAIS aux bouteilles : elles
+  // restent en stock détail, normalement vendables, rien n'est perdu. On ne
+  // "rend" rien en gros non plus, puisqu'on ne peut pas reconstituer un
+  // colis complet à partir de bouteilles déjà entamées — ce serait inventer
+  // une quantité qui n'existe plus.
+  const forceCloseOpening = (id) => {
+    const o = data.openings.find((x) => x.id === id);
+    if (!o) return;
+    persist({ ...data, openings: data.openings.filter((x) => x.id !== id) });
+    showToast("Suivi arrêté — les bouteilles restantes restent en stock détail, normalement vendables.");
   };
 
   const deleteLoan = (id) => {
@@ -1795,7 +1872,7 @@ export default function App({ uid: currentUid, onSignOut }) {
           <SalesTab data={data} productsById={productsById} onAdd={addSale} onBatchAdd={addBatchSales} onPay={(id, a) => recordPayment("sales", id, a)} onDelete={deleteSale} />
         )}
         {tab === "detail" && (
-          <DetailTab data={data} totals={totals} productsById={productsById} onOpen={openPack} onSell={addDetailSale} onPay={(id, a) => recordPayment("detailSales", id, a)} onDeleteSale={deleteDetailSale} onDeleteOpening={deleteOpening} />
+          <DetailTab data={data} totals={totals} productsById={productsById} onOpen={openPack} onSell={addDetailSale} onPay={(id, a) => recordPayment("detailSales", id, a)} onDeleteSale={deleteDetailSale} onDeleteOpening={deleteOpening} onForceCloseOpening={forceCloseOpening} />
         )}
         {tab === "clients" && (
           <ClientsTab
@@ -2801,7 +2878,7 @@ function SalesTab({ data, productsById, onAdd, onBatchAdd, onDelete }) {
 
 /* ------------------------------- Vente détail ----------------------------- */
 
-function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, onDeleteOpening }) {
+function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, onDeleteOpening, onForceCloseOpening }) {
   const [brand, setBrand] = useState("VOLTIC");
   const [openId, setOpenId] = useState("");
   const [openDate, setOpenDate] = useState(todayISO());
@@ -3010,15 +3087,30 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
         <ul className="divide-y divide-slate-100">
           {openingsList.map((o) => {
             const p = productsById[o.productId];
+            const detailLot = (data.lots[o.productId]?.detail || []).find((l) => l.id === o.lotId);
+            const isBlocked = detailLot && detailLot.qty !== detailLot.originalQty;
             return (
-              <li key={o.id} className="py-1.5 flex items-center justify-between text-xs">
-                <span className="text-slate-600">
-                  {new Date(o.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {p?.brand} {p?.format} ouvert (+{p?.units} u.)
-                </span>
-                <ConfirmDeleteButton
-                  onConfirm={() => onDeleteOpening(o.id)}
-                  label="Annuler cette ouverture ? Impossible si des unités ont déjà été vendues dessus."
-                />
+              <li key={o.id} className="py-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">
+                    {new Date(o.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {p?.brand} {p?.format} ouvert (+{p?.units} u.)
+                  </span>
+                  <ConfirmDeleteButton
+                    onConfirm={() => onDeleteOpening(o.id)}
+                    label="Annuler cette ouverture ? Impossible si des unités ont déjà été vendues dessus."
+                  />
+                </div>
+                {isBlocked && detailLot && (
+                  <div className="flex justify-end mt-1">
+                    <ConfirmDeleteButton
+                      size={11}
+                      triggerText="Arrêter le suivi"
+                      confirmText="Arrêter le suivi"
+                      onConfirm={() => onForceCloseOpening(o.id)}
+                      label={`Arrêter le suivi de cette ouverture ? Les ${detailLot.qty} unité(s) restante(s) resteront en stock détail, normalement vendables — rien n'est perdu. Cette ligne disparaît juste du suivi "colis ouverts en cours".`}
+                    />
+                  </div>
+                )}
               </li>
             );
           })}
@@ -3356,12 +3448,13 @@ function Modal({ children, onClose, title }) {
 
 // Petit bouton "corbeille" avec confirmation obligatoire avant suppression,
 // réutilisé partout dans l'app (ventes, réappros, ouvertures, prêts...).
-function ConfirmDeleteButton({ onConfirm, label = "Supprimer cette ligne ?", size = 14 }) {
+function ConfirmDeleteButton({ onConfirm, label = "Supprimer cette ligne ?", size = 14, triggerText, confirmText = "Supprimer" }) {
   const [confirming, setConfirming] = useState(false);
   return (
     <>
-      <button onClick={() => setConfirming(true)} className="text-rose-400 shrink-0" title="Supprimer">
+      <button onClick={() => setConfirming(true)} className="text-rose-400 shrink-0 flex items-center gap-1" title={triggerText || "Supprimer"}>
         <Trash2 size={size} />
+        {triggerText && <span className="text-xs">{triggerText}</span>}
       </button>
       {confirming && (
         <Modal onClose={() => setConfirming(false)} title="Confirmer la suppression">
@@ -3377,7 +3470,7 @@ function ConfirmDeleteButton({ onConfirm, label = "Supprimer cette ligne ?", siz
                 setConfirming(false);
               }}
             >
-              <Trash2 size={14} /> Supprimer
+              <Trash2 size={14} /> {confirmText}
             </Btn>
           </div>
         </Modal>
