@@ -975,12 +975,20 @@ function consumeFifo(lots, qty) {
       continue;
     }
     const take = Math.min(lot.qty, remaining);
+    const rest = lot.qty - take;
     if (take > 0) {
       totalCost += take * lot.unitCost;
       remaining -= take;
-      consumedFrom.push({ id: lot.id, date: lot.date, originalQty: lot.originalQty, unitCost: lot.unitCost, lotNo: lot.lotNo, qtyTaken: take });
+      consumedFrom.push({
+        id: lot.id,
+        date: lot.date,
+        originalQty: lot.originalQty,
+        unitCost: lot.unitCost,
+        lotNo: lot.lotNo,
+        qtyTaken: take,
+        depleted: rest === 0,
+      });
     }
-    const rest = lot.qty - take;
     if (rest > 0) updated.push({ ...lot, qty: rest });
   }
   if (remaining > 0) return { ok: false };
@@ -1003,6 +1011,23 @@ function restoreToLots(currentLots, consumedFrom) {
     }
   });
   return lots;
+}
+
+// Un lot entièrement vendu disparaît du tableau de stock (plus rien à
+// suivre dessus) — on garde quand même une trace permanente ici, pour
+// pouvoir le retrouver dans le registre et ne jamais réattribuer son numéro
+// par erreur.
+function markDepletedLots(depletedLots, productId, kind, consumedFrom, soldDate) {
+  const newlyDepleted = (consumedFrom || [])
+    .filter((c) => c.depleted)
+    .map((c) => ({ id: c.id, productId, kind, lotNo: c.lotNo, date: c.date, originalQty: c.originalQty, unitCost: c.unitCost, depletedOn: soldDate }));
+  return newlyDepleted.length > 0 ? [...newlyDepleted, ...(depletedLots || [])] : depletedLots || [];
+}
+
+// Si une vente qui avait vidé un lot est ensuite supprimée, ce lot redevient
+// disponible — on le retire donc de l'historique des lots épuisés.
+function unmarkDepletedLots(depletedLots, ids) {
+  return (depletedLots || []).filter((d) => !ids.includes(d.id));
 }
 
 function defaultData() {
@@ -1045,6 +1070,7 @@ function defaultData() {
     expenses: [],
     recyclingCollections: [],
     recyclingSales: [],
+    depletedLots: [],
   };
 }
 
@@ -1056,6 +1082,7 @@ function migrate(d) {
   if (!d.expenses) d = { ...d, expenses: [] };
   if (!d.recyclingCollections) d = { ...d, recyclingCollections: [] };
   if (!d.recyclingSales) d = { ...d, recyclingSales: [] };
+  if (!d.depletedLots) d = { ...d, depletedLots: [] };
   if (d.sales && d.sales.some((s) => !s.payments)) {
     d = {
       ...d,
@@ -1295,6 +1322,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       ...data,
       sales: [record, ...data.sales],
       lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], gros: res.lots } },
+      depletedLots: markDepletedLots(data.depletedLots, sale.productId, "gros", res.consumedFrom, sale.date),
     };
     persist(next);
     showToast("Vente enregistrée");
@@ -1333,6 +1361,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         ...working,
         sales: [record, ...working.sales],
         lots: { ...working.lots, [sale.productId]: { ...working.lots[sale.productId], gros: res.lots } },
+        depletedLots: markDepletedLots(working.depletedLots, sale.productId, "gros", res.consumedFrom, sale.date),
       };
     });
     persist(working);
@@ -1376,6 +1405,7 @@ export default function App({ uid: currentUid, onSignOut }) {
         { id: uid(), date: openingDate, productId, qty: 1, lotId: newDetailLot.id, sourceLotId, consumedFrom: res.consumedFrom },
         ...data.openings,
       ],
+      depletedLots: markDepletedLots(data.depletedLots, productId, "gros", res.consumedFrom, openingDate),
     };
     persist(next);
     showToast(`Colis ouvert : +${p.units} unités en détail`);
@@ -1406,6 +1436,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       ...data,
       detailSales: [record, ...data.detailSales],
       lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], detail: res.lots } },
+      depletedLots: markDepletedLots(data.depletedLots, sale.productId, "detail", res.consumedFrom, sale.date),
     };
     persist(next);
     showToast("Vente au détail enregistrée");
@@ -1460,6 +1491,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       meta,
       sales: data.sales.filter((s) => s.id !== id),
       lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], gros: updatedGros } },
+      depletedLots: unmarkDepletedLots(data.depletedLots, (sale.consumedFrom || []).map((c) => c.id)),
     });
     showToast("Vente supprimée, stock restitué");
   };
@@ -1495,6 +1527,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       meta,
       openings: d.openings.filter((x) => x.id !== openingId),
       lots: { ...d.lots, [o.productId]: { gros: updatedGros, detail: detailLots.filter((l) => l.id !== o.lotId) } },
+      depletedLots: unmarkDepletedLots(d.depletedLots, (o.consumedFrom || []).map((c) => c.id)),
     };
   };
 
@@ -1558,6 +1591,7 @@ export default function App({ uid: currentUid, onSignOut }) {
       meta,
       detailSales: data.detailSales.filter((s) => s.id !== id),
       lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], detail: updatedDetail } },
+      depletedLots: unmarkDepletedLots(data.depletedLots, (sale.consumedFrom || []).map((c) => c.id)),
     };
     // Si ça rend un colis ouvert de nouveau intact (ex : bouteille reprise
     // au client, vente annulée), on le repasse automatiquement en gros —
@@ -1862,6 +1896,41 @@ export default function App({ uid: currentUid, onSignOut }) {
     showToast("Lot supprimé");
   };
 
+  // Referme les trous dans la numérotation d'un produit (ex : #15, #17, #18
+  // après suppression du #16) — le numéro de lot n'est utilisé nulle part
+  // ailleurs comme référence technique (seulement pour le tri et
+  // l'affichage), donc renuméroter est sans risque.
+  const renumberProductLots = (productId) => {
+    const gros = data.lots[productId]?.gros || [];
+    const detail = data.lots[productId]?.detail || [];
+    const all = sortLots([...gros.map((l) => ({ ...l, kind: "gros" })), ...detail.map((l) => ({ ...l, kind: "detail" }))]);
+    if (all.length === 0) return;
+    const start = all[0].lotNo; // on garde le même point de départ, on referme juste les trous ensuite
+    const renumbered = {};
+    all.forEach((l, i) => {
+      renumbered[l.id] = start + i;
+    });
+    const newGros = gros.map((l) => ({ ...l, lotNo: renumbered[l.id] }));
+    const newDetail = detail.map((l) => ({ ...l, lotNo: renumbered[l.id] }));
+    persist({
+      ...data,
+      meta: bumpLotSeq(data.meta, productId, start + all.length - 1),
+      lots: { ...data.lots, [productId]: { gros: newGros, detail: newDetail } },
+    });
+    showToast("Lots renumérotés sans trous");
+  };
+
+  // Inscrit manuellement un lot épuisé antérieur à la mise en place de cet
+  // historique (ex : un lot vendu intégralement avant ce correctif). Sert
+  // uniquement de mémoire — ne modifie ni le stock ni le compteur.
+  const addDepletedLotManually = (entry) => {
+    persist({
+      ...data,
+      depletedLots: [{ id: uid(), ...entry }, ...data.depletedLots],
+    });
+    showToast("Lot épuisé ajouté à l'historique");
+  };
+
   // Nouvelle marque ou nouveau format ajouté manuellement — démarre avec un
   // stock vide (à réapprovisionner ensuite normalement).
   const addProduct = (p) => {
@@ -2024,7 +2093,7 @@ export default function App({ uid: currentUid, onSignOut }) {
             onDeletePersonalNote={deletePersonalNote}
           />
         )}
-        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} onSetLotSeq={setLotSeq} onDeleteLot={deleteLotManually} />}
+        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} onSetLotSeq={setLotSeq} onDeleteLot={deleteLotManually} onRenumber={renumberProductLots} onAddDepletedLot={addDepletedLotManually} />}
       </main>
 
       <nav
@@ -4808,7 +4877,7 @@ function ProgressBar({ value, target }) {
 
 /* -------------------------------- Paramètres --------------------------------- */
 
-function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSetLotSeq, onDeleteLot }) {
+function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSetLotSeq, onDeleteLot, onRenumber, onAddDepletedLot }) {
   const brands = brandsOf(data.products);
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
@@ -4817,6 +4886,13 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
   const [pastedJson, setPastedJson] = useState("");
   const [lotSeqEdits, setLotSeqEdits] = useState({});
   const [showAllLots, setShowAllLots] = useState(false);
+  const [depletedForm, setDepletedForm] = useState({
+    productId: "",
+    kind: "detail",
+    lotNo: "",
+    date: "",
+    depletedOn: "",
+  });
   const [newProduct, setNewProduct] = useState({
     brand: "",
     customBrand: "",
@@ -5060,28 +5136,53 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
           </button>
         </div>
         <p className="text-xs text-slate-500 mb-2">
-          Tous les lots gros et détail, produit par produit. Un lot marqué <b className="text-amber-600">⚠ sans origine</b> n'a aucun
-          réappro ni ouverture qui lui correspond — souvent un reste d'un ancien bug. Suppression possible uniquement si rien n'a
-          encore été vendu dessus.
+          Tous les lots gros et détail, produit par produit — y compris ceux <b>entièrement vendus</b> (grisés, gardés en mémoire pour
+          que leur numéro ne soit jamais réattribué). Seuls les lots <b>détail</b> peuvent être marqués{" "}
+          <b className="text-amber-600">⚠ sans origine</b> (aucune ouverture correspondante — souvent un reste d'un ancien bug) ; un
+          lot gros sans réappro est normal s'il vient du stock de départ. Suppression possible uniquement si rien n'a encore été
+          vendu dessus. Si la numérotation d'un produit a un vrai trou (non expliqué par un lot épuisé), un bouton "Renuméroter sans
+          trous" apparaît automatiquement.
         </p>
         {showAllLots && (
           <div className="space-y-3 mt-2">
             {data.products.map((p) => {
               const gros = (data.lots[p.id]?.gros || []).map((l) => ({ ...l, kind: "gros" }));
               const detail = (data.lots[p.id]?.detail || []).map((l) => ({ ...l, kind: "detail" }));
-              const all = sortLots([...gros, ...detail]);
+              const depleted = (data.depletedLots || [])
+                .filter((d) => d.productId === p.id)
+                .map((d) => ({ ...d, isDepleted: true }));
+              const live = sortLots([...gros, ...detail]);
+              const all = sortLots([...live, ...depleted]);
               if (all.length === 0) return null;
+              const hasGap = all.length > 0 && all.some((l, i) => l.lotNo !== all[0].lotNo + i);
               return (
                 <div key={p.id}>
-                  <div className="text-xs font-bold text-slate-600 mb-1">
-                    {p.brand} {p.format}
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-bold text-slate-600">
+                      {p.brand} {p.format}
+                    </div>
+                    {hasGap && (
+                      <button type="button" onClick={() => onRenumber(p.id)} className="text-xs font-semibold text-teal-700">
+                        Renuméroter sans trous
+                      </button>
+                    )}
                   </div>
                   <ul className="divide-y divide-slate-100">
                     {all.map((l) => {
-                      const isOrphan =
-                        !data.restocks.some((r) => r.lotId === l.id) &&
-                        !data.openings.some((o) => o.lotId === l.id) &&
-                        l.lotNo !== 1; // lotNo 1 = stock de départ, normal de n'avoir aucun réappro/ouverture
+                      if (l.isDepleted) {
+                        return (
+                          <li key={l.id} className="py-1.5 flex items-center justify-between text-xs opacity-60">
+                            <span className="text-slate-500">
+                              {l.kind === "gros" ? "Gros" : "Détail"} — Lot #{l.lotNo} — {new Date(l.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} —{" "}
+                              <i>épuisé, vendu intégralement le {new Date(l.depletedOn).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</i>
+                            </span>
+                          </li>
+                        );
+                      }
+                      // Seuls les lots DÉTAIL viennent forcément d'une ouverture — les
+                      // lots gros peuvent légitimement dater du stock de départ (aucun
+                      // réappro associé), donc on ne les marque jamais "sans origine".
+                      const isOrphan = l.kind === "detail" && !data.openings.some((o) => o.lotId === l.id);
                       const untouched = l.qty === l.originalQty;
                       return (
                         <li key={l.id} className="py-1.5 flex items-center justify-between text-xs">
@@ -5108,6 +5209,70 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
                 </div>
               );
             })}
+
+            <div className="border-t border-slate-100 pt-3">
+              <div className="text-xs font-bold text-slate-600 mb-1">Ajouter un lot épuisé (historique manuel)</div>
+              <p className="text-xs text-slate-500 mb-2">
+                Pour un lot vendu intégralement avant la mise en place de cet historique — juste pour la mémoire, ça ne change ni le
+                stock ni les compteurs.
+              </p>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <Select
+                  value={depletedForm.productId}
+                  onChange={(v) => setDepletedForm({ ...depletedForm, productId: v })}
+                  options={data.products.map((p) => ({ value: p.id, label: `${p.brand} ${p.format}` }))}
+                  placeholder="Article"
+                />
+                <Select
+                  value={depletedForm.kind}
+                  onChange={(v) => setDepletedForm({ ...depletedForm, kind: v })}
+                  options={[
+                    { value: "detail", label: "Détail" },
+                    { value: "gros", label: "Gros" },
+                  ]}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <Input
+                  type="number"
+                  placeholder="Numéro de lot (ex: 16)"
+                  value={depletedForm.lotNo}
+                  onChange={(e) => setDepletedForm({ ...depletedForm, lotNo: e.target.value })}
+                />
+                <div>
+                  <label className="text-xs text-slate-400">Date d'ouverture / réappro</label>
+                  <Input type="date" value={depletedForm.date} onChange={(e) => setDepletedForm({ ...depletedForm, date: e.target.value })} />
+                </div>
+              </div>
+              <div className="mb-2">
+                <label className="text-xs text-slate-400">Date où il a été entièrement vendu (si connue, sinon laisser vide)</label>
+                <Input
+                  type="date"
+                  value={depletedForm.depletedOn}
+                  onChange={(e) => setDepletedForm({ ...depletedForm, depletedOn: e.target.value })}
+                />
+              </div>
+              <Btn
+                kind="ghost"
+                className="w-full"
+                onClick={() => {
+                  if (!depletedForm.productId || !depletedForm.lotNo || !depletedForm.date) return;
+                  const p = data.products.find((x) => x.id === depletedForm.productId);
+                  onAddDepletedLot({
+                    productId: depletedForm.productId,
+                    kind: depletedForm.kind,
+                    lotNo: Number(depletedForm.lotNo),
+                    date: depletedForm.date,
+                    originalQty: depletedForm.kind === "detail" ? p.units : 1,
+                    unitCost: depletedForm.kind === "detail" ? p.purchase / p.units : p.purchase,
+                    depletedOn: depletedForm.depletedOn || depletedForm.date,
+                  });
+                  setDepletedForm({ productId: "", kind: "detail", lotNo: "", date: "", depletedOn: "" });
+                }}
+              >
+                <Plus size={16} /> Ajouter à l'historique
+              </Btn>
+            </div>
           </div>
         )}
       </Card>
