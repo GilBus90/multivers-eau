@@ -917,29 +917,27 @@ const todayISO = () => localISO(new Date());
 
 /* Stock est géré en LOTS (FIFO) : chaque entrée de stock (stock initial,   */
 /* réappro, ouverture de colis) crée un lot daté, numéroté séquentiellement */
-/* PAR PRODUIT (lotNo, persisté dans meta.lotSeqByProduct[productId]) — pas */
-/* de compteur global, pour que les numéros restent lisibles pour un même  */
-/* article, indépendamment de ce qui se passe ailleurs dans l'app.         */
+/* dans UNE SEULE suite linéaire, commune à toute l'application (lotNo,     */
+/* persisté dans meta.lotSeq) — exactement comme au tout début. Quand une   */
+/* action est complètement annulée (colis redevenu intact, réappro         */
+/* supprimé sans rien avoir vendu dessus), le numéro qu'elle avait pris est */
+/* rendu — mais seulement s'il s'agit bien du tout dernier numéro attribué, */
+/* pour ne jamais créer de doublon avec un lot plus récent encore existant. */
 /* Les ventes consomment d'abord les lots les plus anciens.                 */
 function sortLots(lots) {
   return [...lots].sort((a, b) => (a.date === b.date ? a.lotNo - b.lotNo : a.date.localeCompare(b.date)));
 }
 
-function nextLotNo(meta, productId) {
-  return ((meta.lotSeqByProduct || {})[productId] || 0) + 1;
+function nextLotNo(meta) {
+  return (meta.lotSeq || 0) + 1;
 }
 
-function bumpLotSeq(meta, productId, newSeq) {
-  return { ...meta, lotSeqByProduct: { ...(meta.lotSeqByProduct || {}), [productId]: newSeq } };
+function bumpLotSeq(meta, newSeq) {
+  return { ...meta, lotSeq: newSeq };
 }
 
-// Quand une action est complètement annulée (colis redevenu intact, réappro
-// supprimé sans avoir été touché), on rend le numéro qu'elle avait pris —
-// mais seulement s'il s'agit bien du DERNIER numéro attribué à ce produit,
-// pour ne jamais créer de doublon avec un lot plus récent encore existant.
-function releaseLotNoIfLast(meta, productId, lotNo) {
-  const current = (meta.lotSeqByProduct || {})[productId];
-  if (current === lotNo) return bumpLotSeq(meta, productId, lotNo - 1);
+function releaseLotNoIfLast(meta, lotNo) {
+  if ((meta.lotSeq || 0) === lotNo) return bumpLotSeq(meta, lotNo - 1);
   return meta;
 }
 
@@ -1033,20 +1031,20 @@ function unmarkDepletedLots(depletedLots, ids) {
 function defaultData() {
   const startDate = START_DATE;
   const lots = {};
-  const lotSeqByProduct = {};
+  let lotSeq = 0;
   Object.entries(INITIAL_STOCK).forEach(([brand, qtys]) => {
     qtys.forEach((q, idx) => {
       const id = `${brand}-${idx}`;
       const product = CATALOG.filter((c) => c.brand === brand)[idx];
-      if (q > 0) lotSeqByProduct[id] = 1;
+      if (q > 0) lotSeq += 1;
       lots[id] = {
-        gros: q > 0 ? [{ id: uid(), date: startDate, qty: q, originalQty: q, unitCost: product.purchase, lotNo: 1 }] : [],
+        gros: q > 0 ? [{ id: uid(), date: startDate, qty: q, originalQty: q, unitCost: product.purchase, lotNo: lotSeq }] : [],
         detail: [],
       };
     });
   });
   return {
-    meta: { initialCash: 0, startingCapital: 1000000, startDate, createdAt: new Date().toISOString(), lotSeqByProduct },
+    meta: { initialCash: 0, startingCapital: 1000000, startDate, createdAt: new Date().toISOString(), lotSeq },
     products: buildDefaultProducts(),
     lots,
     sales: [],
@@ -1113,10 +1111,9 @@ function migrate(d) {
     };
   }
   if (d.lots) {
-    const maxNoByProduct = {};
+    let maxNo = 0;
     let touched = false;
-    Object.entries(d.lots).forEach(([productId, row]) => {
-      let maxNo = 0;
+    Object.values(d.lots).forEach((row) => {
       [...(row.gros || []), ...(row.detail || [])].forEach((l) => {
         if (typeof l.lotNo !== "number") {
           maxNo += 1;
@@ -1128,35 +1125,30 @@ function migrate(d) {
           touched = true;
         }
       });
-      maxNoByProduct[productId] = maxNo;
     });
-    if (touched || !d.meta.lotSeqByProduct) {
-      // Migration depuis l'ancienne numérotation globale (meta.lotSeq) — on
-      // reconstruit un compteur propre à chaque produit à partir des
-      // numéros de lot réellement présents sur ses propres lots.
-      const merged = { ...(d.meta.lotSeqByProduct || {}) };
-      Object.entries(maxNoByProduct).forEach(([pid, maxNo]) => {
-        merged[pid] = Math.max(maxNo, merged[pid] || 0);
-      });
-      d = { ...d, meta: { ...d.meta, lotSeqByProduct: merged } };
+    if (touched || d.meta.lotSeq == null) {
+      // Migration depuis l'ancienne numérotation par produit (ou depuis une
+      // sauvegarde plus ancienne encore) — on reconstruit une suite globale
+      // unique à partir du plus grand numéro de lot réellement présent,
+      // tous produits confondus, pour ne jamais réattribuer un numéro déjà
+      // utilisé quelque part.
+      d = { ...d, meta: { ...d.meta, lotSeq: Math.max(maxNo, d.meta.lotSeq || 0) } };
     }
     return fixStartDate(d);
   }
   const lots = {};
-  const lotSeqByProduct = {};
+  let lotSeq = 0;
   d.products.forEach((p) => {
     const row = (d.stock && d.stock[p.id]) || { gros: 0, detail: 0 };
-    let seq = 0;
-    const grosLotNo = row.gros > 0 ? ++seq : null;
-    const detailLotNo = row.detail > 0 ? ++seq : null;
-    if (seq > 0) lotSeqByProduct[p.id] = seq;
+    const grosLotNo = row.gros > 0 ? ++lotSeq : null;
+    const detailLotNo = row.detail > 0 ? ++lotSeq : null;
     lots[p.id] = {
       gros: row.gros > 0 ? [{ id: uid(), date: d.meta.startDate, qty: row.gros, originalQty: row.gros, unitCost: p.purchase, lotNo: grosLotNo }] : [],
       detail: row.detail > 0 ? [{ id: uid(), date: d.meta.startDate, qty: row.detail, originalQty: row.detail, unitCost: p.purchase / p.units, lotNo: detailLotNo }] : [],
     };
   });
   const { stock, ...rest } = d;
-  return fixStartDate({ ...rest, lots, meta: { ...rest.meta, lotSeqByProduct } });
+  return fixStartDate({ ...rest, lots, meta: { ...rest.meta, lotSeq } });
 }
 
 // Si le suivi n'a pas encore commencé (aucune vente/réappro/ouverture), on
@@ -1384,7 +1376,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     const sourceLotId = sortLots(grosLots)[0].id;
     const res = consumeFifo(grosLots, 1);
     const detailLots = data.lots[productId]?.detail || [];
-    const lotNo = nextLotNo(data.meta, productId);
+    const lotNo = nextLotNo(data.meta);
     const newDetailLot = {
       id: uid(),
       date: date || todayISO(),
@@ -1396,7 +1388,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     const openingDate = date || todayISO();
     const next = {
       ...data,
-      meta: bumpLotSeq(data.meta, productId, lotNo),
+      meta: bumpLotSeq(data.meta, lotNo),
       lots: {
         ...data.lots,
         [productId]: { gros: res.lots, detail: [...detailLots, newDetailLot] },
@@ -1445,7 +1437,7 @@ export default function App({ uid: currentUid, onSignOut }) {
 
   const addRestock = (r) => {
     const grosLots = data.lots[r.productId]?.gros || [];
-    const lotNo = nextLotNo(data.meta, r.productId);
+    const lotNo = nextLotNo(data.meta);
     const newLot = { id: uid(), date: r.date, qty: r.qty, originalQty: r.qty, unitCost: r.unitCost, lotNo };
     const record = { id: uid(), date: r.date, productId: r.productId, qty: r.qty, unitCost: r.unitCost, lotId: newLot.id };
     let products = data.products;
@@ -1454,7 +1446,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     }
     const next = {
       ...data,
-      meta: bumpLotSeq(data.meta, r.productId, lotNo),
+      meta: bumpLotSeq(data.meta, lotNo),
       products,
       restocks: [record, ...data.restocks],
       lots: { ...data.lots, [r.productId]: { ...data.lots[r.productId], gros: [...grosLots, newLot] } },
@@ -1482,8 +1474,8 @@ export default function App({ uid: currentUid, onSignOut }) {
       // Anciennes ventes (avant ce correctif) : pas d'historique de
       // consommation précis, on retombe sur l'ancien comportement (un
       // nouveau lot séparé) plutôt que de deviner.
-      const lotNo = nextLotNo(meta, sale.productId);
-      meta = bumpLotSeq(meta, sale.productId, lotNo);
+      const lotNo = nextLotNo(meta);
+      meta = bumpLotSeq(meta, lotNo);
       updatedGros = [...grosLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo }];
     }
     persist({
@@ -1514,14 +1506,14 @@ export default function App({ uid: currentUid, onSignOut }) {
     if (o.consumedFrom) {
       updatedGros = restoreToLots(grosLots, o.consumedFrom);
     } else {
-      const lotNo = nextLotNo(meta, o.productId);
-      meta = bumpLotSeq(meta, o.productId, lotNo);
+      const lotNo = nextLotNo(meta);
+      meta = bumpLotSeq(meta, lotNo);
       updatedGros = [...grosLots, { id: uid(), date: o.date, qty: 1, originalQty: 1, unitCost: lot.unitCost * p.units, lotNo }];
     }
     // Le colis redevient exactement comme s'il n'avait jamais été ouvert —
     // si son numéro était le dernier attribué à ce produit, on le rend pour
     // que la prochaine ouverture le reprenne, au lieu de sauter un cran.
-    meta = releaseLotNoIfLast(meta, o.productId, lot.lotNo);
+    meta = releaseLotNoIfLast(meta, lot.lotNo);
     return {
       ...d,
       meta,
@@ -1582,8 +1574,8 @@ export default function App({ uid: currentUid, onSignOut }) {
     if (sale.consumedFrom) {
       updatedDetail = restoreToLots(detailLots, sale.consumedFrom);
     } else {
-      const lotNo = nextLotNo(meta, sale.productId);
-      meta = bumpLotSeq(meta, sale.productId, lotNo);
+      const lotNo = nextLotNo(meta);
+      meta = bumpLotSeq(meta, lotNo);
       updatedDetail = [...detailLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo }];
     }
     let next = {
@@ -1623,7 +1615,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     }
     persist({
       ...data,
-      meta: releaseLotNoIfLast(data.meta, r.productId, lot.lotNo),
+      meta: releaseLotNoIfLast(data.meta, lot.lotNo),
       restocks: data.restocks.filter((x) => x.id !== id),
       lots: { ...data.lots, [r.productId]: { ...data.lots[r.productId], gros: grosLots.filter((l) => l.id !== r.lotId) } },
     });
@@ -1866,12 +1858,11 @@ export default function App({ uid: currentUid, onSignOut }) {
     persist({ ...data, products: data.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
   };
 
-  // Réglage manuel du compteur de lots d'un produit — utile pour corriger
-  // une numérotation qui a "sauté" (ex : après avoir annulé plusieurs
-  // ouvertures/ventes de suite). La valeur saisie est le DERNIER numéro
-  // utilisé ; le prochain lot de ce produit prendra valeur+1.
-  const setLotSeq = (productId, value) => {
-    persist({ ...data, meta: bumpLotSeq(data.meta, productId, Number(value) || 0) });
+  // Réglage manuel du compteur de lots global — utile pour corriger une
+  // numérotation qui a "sauté". La valeur saisie est le DERNIER numéro
+  // utilisé, tous produits confondus ; le prochain lot prendra valeur+1.
+  const setLotSeq = (value) => {
+    persist({ ...data, meta: bumpLotSeq(data.meta, Number(value) || 0) });
     showToast("Compteur de lots mis à jour");
   };
 
@@ -1888,7 +1879,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     }
     persist({
       ...data,
-      meta: releaseLotNoIfLast(data.meta, productId, lot.lotNo),
+      meta: releaseLotNoIfLast(data.meta, lot.lotNo),
       restocks: data.restocks.filter((r) => r.lotId !== lotId),
       openings: data.openings.filter((o) => o.lotId !== lotId),
       lots: { ...data.lots, [productId]: { ...data.lots[productId], [kind]: lots.filter((l) => l.id !== lotId) } },
@@ -1896,29 +1887,9 @@ export default function App({ uid: currentUid, onSignOut }) {
     showToast("Lot supprimé");
   };
 
-  // Referme les trous dans la numérotation d'un produit (ex : #15, #17, #18
-  // après suppression du #16) — le numéro de lot n'est utilisé nulle part
-  // ailleurs comme référence technique (seulement pour le tri et
-  // l'affichage), donc renuméroter est sans risque.
-  const renumberProductLots = (productId) => {
-    const gros = data.lots[productId]?.gros || [];
-    const detail = data.lots[productId]?.detail || [];
-    const all = sortLots([...gros.map((l) => ({ ...l, kind: "gros" })), ...detail.map((l) => ({ ...l, kind: "detail" }))]);
-    if (all.length === 0) return;
-    const start = all[0].lotNo; // on garde le même point de départ, on referme juste les trous ensuite
-    const renumbered = {};
-    all.forEach((l, i) => {
-      renumbered[l.id] = start + i;
-    });
-    const newGros = gros.map((l) => ({ ...l, lotNo: renumbered[l.id] }));
-    const newDetail = detail.map((l) => ({ ...l, lotNo: renumbered[l.id] }));
-    persist({
-      ...data,
-      meta: bumpLotSeq(data.meta, productId, start + all.length - 1),
-      lots: { ...data.lots, [productId]: { gros: newGros, detail: newDetail } },
-    });
-    showToast("Lots renumérotés sans trous");
-  };
+  // Note : plus de "renumérotation des trous" par produit — sous une suite
+  // globale, un écart entre deux lots d'un même produit est parfaitement
+  // normal (d'autres produits ont eu de l'activité entre-temps).
 
   // Inscrit manuellement un lot épuisé antérieur à la mise en place de cet
   // historique (ex : un lot vendu intégralement avant ce correctif). Sert
@@ -2093,7 +2064,7 @@ export default function App({ uid: currentUid, onSignOut }) {
             onDeletePersonalNote={deletePersonalNote}
           />
         )}
-        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} onSetLotSeq={setLotSeq} onDeleteLot={deleteLotManually} onRenumber={renumberProductLots} onAddDepletedLot={addDepletedLotManually} />}
+        {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} onSetLotSeq={setLotSeq} onDeleteLot={deleteLotManually} onAddDepletedLot={addDepletedLotManually} />}
       </main>
 
       <nav
@@ -4877,14 +4848,14 @@ function ProgressBar({ value, target }) {
 
 /* -------------------------------- Paramètres --------------------------------- */
 
-function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSetLotSeq, onDeleteLot, onRenumber, onAddDepletedLot }) {
+function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSetLotSeq, onDeleteLot, onAddDepletedLot }) {
   const brands = brandsOf(data.products);
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pastedJson, setPastedJson] = useState("");
-  const [lotSeqEdits, setLotSeqEdits] = useState({});
+  const [lotSeqEdit, setLotSeqEdit] = useState(undefined);
   const [showAllLots, setShowAllLots] = useState(false);
   const [depletedForm, setDepletedForm] = useState({
     productId: "",
@@ -5129,6 +5100,30 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
       </Card>
 
       <Card>
+        <SectionTitle icon={Boxes}>Compteur de lots (global)</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Une seule suite, commune à tous les articles. La valeur ci-dessous est le <b>dernier numéro utilisé</b> — le prochain lot
+          créé (n'importe quel produit) prendra valeur+1.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            type="number"
+            value={lotSeqEdit ?? (data.meta.lotSeq || 0)}
+            onChange={(e) => setLotSeqEdit(e.target.value)}
+          />
+          <Btn
+            kind="ghost"
+            onClick={() => {
+              onSetLotSeq(lotSeqEdit ?? (data.meta.lotSeq || 0));
+              setLotSeqEdit(undefined);
+            }}
+          >
+            Régler
+          </Btn>
+        </div>
+      </Card>
+
+      <Card>
         <div className="flex items-center justify-between mb-2">
           <SectionTitle icon={Boxes}>Registre de tous les lots</SectionTitle>
           <button type="button" onClick={() => setShowAllLots((v) => !v)} className="text-xs font-semibold text-teal-700">
@@ -5140,8 +5135,8 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
           que leur numéro ne soit jamais réattribué). Seuls les lots <b>détail</b> peuvent être marqués{" "}
           <b className="text-amber-600">⚠ sans origine</b> (aucune ouverture correspondante — souvent un reste d'un ancien bug) ; un
           lot gros sans réappro est normal s'il vient du stock de départ. Suppression possible uniquement si rien n'a encore été
-          vendu dessus. Si la numérotation d'un produit a un vrai trou (non expliqué par un lot épuisé), un bouton "Renuméroter sans
-          trous" apparaît automatiquement.
+          vendu dessus. La numérotation est une seule suite commune à toute l'application — un écart entre deux lots d'un même
+          produit est donc normal (d'autres produits ont eu de l'activité entre-temps), pas une erreur à corriger.
         </p>
         {showAllLots && (
           <div className="space-y-3 mt-2">
@@ -5154,18 +5149,10 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
               const live = sortLots([...gros, ...detail]);
               const all = sortLots([...live, ...depleted]);
               if (all.length === 0) return null;
-              const hasGap = all.length > 0 && all.some((l, i) => l.lotNo !== all[0].lotNo + i);
               return (
                 <div key={p.id}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-bold text-slate-600">
-                      {p.brand} {p.format}
-                    </div>
-                    {hasGap && (
-                      <button type="button" onClick={() => onRenumber(p.id)} className="text-xs font-semibold text-teal-700">
-                        Renuméroter sans trous
-                      </button>
-                    )}
+                  <div className="text-xs font-bold text-slate-600 mb-1">
+                    {p.brand} {p.format}
                   </div>
                   <ul className="divide-y divide-slate-100">
                     {all.map((l) => {
@@ -5311,29 +5298,6 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
                       <label className="text-xs text-slate-400">Vente détail (/u)</label>
                       <Input type="number" value={p.retailPrice} onChange={(e) => onUpdate(p.id, { retailPrice: Number(e.target.value) })} />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs items-end mt-2 pt-2 border-t border-slate-100">
-                    <div className="col-span-2">
-                      <label className="text-xs text-slate-400">
-                        Compteur de lots (dernier n° utilisé — le prochain sera n°+1)
-                      </label>
-                      <Input
-                        type="number"
-                        placeholder={String((data.meta.lotSeqByProduct || {})[p.id] || 0)}
-                        value={lotSeqEdits[p.id] ?? ""}
-                        onChange={(e) => setLotSeqEdits({ ...lotSeqEdits, [p.id]: e.target.value })}
-                      />
-                    </div>
-                    <Btn
-                      kind="ghost"
-                      onClick={() => {
-                        if (lotSeqEdits[p.id] === undefined || lotSeqEdits[p.id] === "") return;
-                        onSetLotSeq(p.id, lotSeqEdits[p.id]);
-                        setLotSeqEdits({ ...lotSeqEdits, [p.id]: "" });
-                      }}
-                    >
-                      Régler
-                    </Btn>
                   </div>
                 </div>
               ))}
