@@ -917,10 +917,20 @@ const todayISO = () => localISO(new Date());
 
 /* Stock est géré en LOTS (FIFO) : chaque entrée de stock (stock initial,   */
 /* réappro, ouverture de colis) crée un lot daté, numéroté séquentiellement */
-/* (lotNo, persisté dans meta.lotSeq) et avec son propre coût.              */
+/* PAR PRODUIT (lotNo, persisté dans meta.lotSeqByProduct[productId]) — pas */
+/* de compteur global, pour que les numéros restent lisibles pour un même  */
+/* article, indépendamment de ce qui se passe ailleurs dans l'app.         */
 /* Les ventes consomment d'abord les lots les plus anciens.                 */
 function sortLots(lots) {
   return [...lots].sort((a, b) => (a.date === b.date ? a.lotNo - b.lotNo : a.date.localeCompare(b.date)));
+}
+
+function nextLotNo(meta, productId) {
+  return ((meta.lotSeqByProduct || {})[productId] || 0) + 1;
+}
+
+function bumpLotSeq(meta, productId, newSeq) {
+  return { ...meta, lotSeqByProduct: { ...(meta.lotSeqByProduct || {}), [productId]: newSeq } };
 }
 
 function lotsQty(lots) {
@@ -988,20 +998,20 @@ function restoreToLots(currentLots, consumedFrom) {
 function defaultData() {
   const startDate = START_DATE;
   const lots = {};
-  let lotSeq = 0;
+  const lotSeqByProduct = {};
   Object.entries(INITIAL_STOCK).forEach(([brand, qtys]) => {
     qtys.forEach((q, idx) => {
       const id = `${brand}-${idx}`;
       const product = CATALOG.filter((c) => c.brand === brand)[idx];
-      if (q > 0) lotSeq += 1;
+      if (q > 0) lotSeqByProduct[id] = 1;
       lots[id] = {
-        gros: q > 0 ? [{ id: uid(), date: startDate, qty: q, originalQty: q, unitCost: product.purchase, lotNo: lotSeq }] : [],
+        gros: q > 0 ? [{ id: uid(), date: startDate, qty: q, originalQty: q, unitCost: product.purchase, lotNo: 1 }] : [],
         detail: [],
       };
     });
   });
   return {
-    meta: { initialCash: 0, startingCapital: 1000000, startDate, createdAt: new Date().toISOString(), lotSeq },
+    meta: { initialCash: 0, startingCapital: 1000000, startDate, createdAt: new Date().toISOString(), lotSeqByProduct },
     products: buildDefaultProducts(),
     lots,
     sales: [],
@@ -1066,12 +1076,14 @@ function migrate(d) {
     };
   }
   if (d.lots) {
-    let maxNo = 0;
+    const maxNoByProduct = {};
     let touched = false;
-    Object.values(d.lots).forEach((row) => {
+    Object.entries(d.lots).forEach(([productId, row]) => {
+      let maxNo = 0;
       [...(row.gros || []), ...(row.detail || [])].forEach((l) => {
         if (typeof l.lotNo !== "number") {
-          l.lotNo = ++maxNo;
+          maxNo += 1;
+          l.lotNo = maxNo;
           touched = true;
         } else maxNo = Math.max(maxNo, l.lotNo);
         if (typeof l.originalQty !== "number") {
@@ -1079,25 +1091,35 @@ function migrate(d) {
           touched = true;
         }
       });
+      maxNoByProduct[productId] = maxNo;
     });
-    if (touched || d.meta.lotSeq == null) {
-      d = { ...d, meta: { ...d.meta, lotSeq: Math.max(maxNo, d.meta.lotSeq || 0) } };
+    if (touched || !d.meta.lotSeqByProduct) {
+      // Migration depuis l'ancienne numérotation globale (meta.lotSeq) — on
+      // reconstruit un compteur propre à chaque produit à partir des
+      // numéros de lot réellement présents sur ses propres lots.
+      const merged = { ...(d.meta.lotSeqByProduct || {}) };
+      Object.entries(maxNoByProduct).forEach(([pid, maxNo]) => {
+        merged[pid] = Math.max(maxNo, merged[pid] || 0);
+      });
+      d = { ...d, meta: { ...d.meta, lotSeqByProduct: merged } };
     }
     return fixStartDate(d);
   }
   const lots = {};
-  let lotSeq = 0;
+  const lotSeqByProduct = {};
   d.products.forEach((p) => {
     const row = (d.stock && d.stock[p.id]) || { gros: 0, detail: 0 };
-    const grosLotNo = row.gros > 0 ? ++lotSeq : null;
-    const detailLotNo = row.detail > 0 ? ++lotSeq : null;
+    let seq = 0;
+    const grosLotNo = row.gros > 0 ? ++seq : null;
+    const detailLotNo = row.detail > 0 ? ++seq : null;
+    if (seq > 0) lotSeqByProduct[p.id] = seq;
     lots[p.id] = {
       gros: row.gros > 0 ? [{ id: uid(), date: d.meta.startDate, qty: row.gros, originalQty: row.gros, unitCost: p.purchase, lotNo: grosLotNo }] : [],
       detail: row.detail > 0 ? [{ id: uid(), date: d.meta.startDate, qty: row.detail, originalQty: row.detail, unitCost: p.purchase / p.units, lotNo: detailLotNo }] : [],
     };
   });
   const { stock, ...rest } = d;
-  return fixStartDate({ ...rest, lots, meta: { ...rest.meta, lotSeq } });
+  return fixStartDate({ ...rest, lots, meta: { ...rest.meta, lotSeqByProduct } });
 }
 
 // Si le suivi n'a pas encore commencé (aucune vente/réappro/ouverture), on
@@ -1323,7 +1345,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     const sourceLotId = sortLots(grosLots)[0].id;
     const res = consumeFifo(grosLots, 1);
     const detailLots = data.lots[productId]?.detail || [];
-    const lotNo = (data.meta.lotSeq || 0) + 1;
+    const lotNo = nextLotNo(data.meta, productId);
     const newDetailLot = {
       id: uid(),
       date: date || todayISO(),
@@ -1335,7 +1357,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     const openingDate = date || todayISO();
     const next = {
       ...data,
-      meta: { ...data.meta, lotSeq: lotNo },
+      meta: bumpLotSeq(data.meta, productId, lotNo),
       lots: {
         ...data.lots,
         [productId]: { gros: res.lots, detail: [...detailLots, newDetailLot] },
@@ -1382,7 +1404,7 @@ export default function App({ uid: currentUid, onSignOut }) {
 
   const addRestock = (r) => {
     const grosLots = data.lots[r.productId]?.gros || [];
-    const lotNo = (data.meta.lotSeq || 0) + 1;
+    const lotNo = nextLotNo(data.meta, r.productId);
     const newLot = { id: uid(), date: r.date, qty: r.qty, originalQty: r.qty, unitCost: r.unitCost, lotNo };
     const record = { id: uid(), date: r.date, productId: r.productId, qty: r.qty, unitCost: r.unitCost, lotId: newLot.id };
     let products = data.products;
@@ -1391,7 +1413,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     }
     const next = {
       ...data,
-      meta: { ...data.meta, lotSeq: lotNo },
+      meta: bumpLotSeq(data.meta, r.productId, lotNo),
       products,
       restocks: [record, ...data.restocks],
       lots: { ...data.lots, [r.productId]: { ...data.lots[r.productId], gros: [...grosLots, newLot] } },
@@ -1410,7 +1432,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     if (!sale) return;
     const grosLots = data.lots[sale.productId]?.gros || [];
     let updatedGros;
-    let lotSeq = data.meta.lotSeq || 0;
+    let meta = data.meta;
     if (sale.consumedFrom) {
       // Ventes récentes : on sait exactement de quel(s) lot(s) ça vient — on
       // restitue dessus, quitte à les recréer s'ils avaient été épuisés.
@@ -1419,12 +1441,13 @@ export default function App({ uid: currentUid, onSignOut }) {
       // Anciennes ventes (avant ce correctif) : pas d'historique de
       // consommation précis, on retombe sur l'ancien comportement (un
       // nouveau lot séparé) plutôt que de deviner.
-      lotSeq += 1;
-      updatedGros = [...grosLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo: lotSeq }];
+      const lotNo = nextLotNo(meta, sale.productId);
+      meta = bumpLotSeq(meta, sale.productId, lotNo);
+      updatedGros = [...grosLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo }];
     }
     persist({
       ...data,
-      meta: { ...data.meta, lotSeq },
+      meta,
       sales: data.sales.filter((s) => s.id !== id),
       lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], gros: updatedGros } },
     });
@@ -1445,16 +1468,17 @@ export default function App({ uid: currentUid, onSignOut }) {
     const p = productsById[o.productId];
     const grosLots = d.lots[o.productId]?.gros || [];
     let updatedGros;
-    let lotSeq = d.meta.lotSeq || 0;
+    let meta = d.meta;
     if (o.consumedFrom) {
       updatedGros = restoreToLots(grosLots, o.consumedFrom);
     } else {
-      lotSeq += 1;
-      updatedGros = [...grosLots, { id: uid(), date: o.date, qty: 1, originalQty: 1, unitCost: lot.unitCost * p.units, lotNo: lotSeq }];
+      const lotNo = nextLotNo(meta, o.productId);
+      meta = bumpLotSeq(meta, o.productId, lotNo);
+      updatedGros = [...grosLots, { id: uid(), date: o.date, qty: 1, originalQty: 1, unitCost: lot.unitCost * p.units, lotNo }];
     }
     return {
       ...d,
-      meta: { ...d.meta, lotSeq },
+      meta,
       openings: d.openings.filter((x) => x.id !== openingId),
       lots: { ...d.lots, [o.productId]: { gros: updatedGros, detail: detailLots.filter((l) => l.id !== o.lotId) } },
     };
@@ -1507,16 +1531,17 @@ export default function App({ uid: currentUid, onSignOut }) {
     if (!sale) return;
     const detailLots = data.lots[sale.productId]?.detail || [];
     let updatedDetail;
-    let lotSeq = data.meta.lotSeq || 0;
+    let meta = data.meta;
     if (sale.consumedFrom) {
       updatedDetail = restoreToLots(detailLots, sale.consumedFrom);
     } else {
-      lotSeq += 1;
-      updatedDetail = [...detailLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo: lotSeq }];
+      const lotNo = nextLotNo(meta, sale.productId);
+      meta = bumpLotSeq(meta, sale.productId, lotNo);
+      updatedDetail = [...detailLots, { id: uid(), date: sale.date, qty: sale.qty, originalQty: sale.qty, unitCost: sale.unitCost, lotNo }];
     }
     let next = {
       ...data,
-      meta: { ...data.meta, lotSeq },
+      meta,
       detailSales: data.detailSales.filter((s) => s.id !== id),
       lots: { ...data.lots, [sale.productId]: { ...data.lots[sale.productId], detail: updatedDetail } },
     };
