@@ -1460,6 +1460,48 @@ export default function App({ uid: currentUid, onSignOut }) {
     };
   };
 
+  // Nettoyage : fusionne les "lots fantômes" créés par l'ancien bug de
+  // restitution (avant correctif) — des mini-lots détail isolés, sans
+  // aucune ouverture correspondante dans l'historique, apparus quand une
+  // vente supprimée créait un nouveau lot séparé au lieu de réparer
+  // l'original. Un lot orphelin (sans ouverture liée) n'est jamais un
+  // "nouveau colis" — c'est un morceau du même colis d'origine, mal
+  // restitué par l'ancien bug. On ne compte donc sa capacité qu'une seule
+  // fois (celle du lot réellement ouvert), pas en plus : le résultat
+  // retrouve exactement le vrai compte (ex : 0 vendue / 6, pas 2 vendues / 8).
+  const mergeOrphanDetailLots = (productId) => {
+    const detailLots = data.lots[productId]?.detail || [];
+    if (detailLots.length <= 1) {
+      showToast("Rien à fusionner pour cet article");
+      return;
+    }
+    const sorted = sortLots(detailLots);
+    const first = sorted[0];
+    const anchoredIds = new Set(data.openings.filter((o) => o.productId === productId).map((o) => o.lotId));
+    const anchored = sorted.filter((l) => anchoredIds.has(l.id));
+    const base = anchored.length > 0 ? anchored : sorted; // repli si aucun lot n'a d'ouverture liée
+    const totalQty = sorted.reduce((s, l) => s + l.qty, 0);
+    const totalOriginal = base.reduce((s, l) => s + l.originalQty, 0);
+    const weightedCost = sorted.reduce((s, l) => s + l.qty * l.unitCost, 0) / (totalQty || 1);
+    const merged = {
+      id: first.id,
+      date: first.date,
+      lotNo: first.lotNo,
+      qty: Math.min(totalQty, totalOriginal),
+      originalQty: totalOriginal,
+      unitCost: weightedCost,
+    };
+    // Les ouvertures qui pointaient sur les lots absorbés doivent maintenant
+    // pointer sur le lot fusionné, sinon elles deviendraient orphelines.
+    const absorbedIds = sorted.slice(1).map((l) => l.id);
+    persist({
+      ...data,
+      openings: data.openings.map((o) => (absorbedIds.includes(o.lotId) ? { ...o, lotId: merged.id } : o)),
+      lots: { ...data.lots, [productId]: { ...data.lots[productId], detail: [merged] } },
+    });
+    showToast("Lots fusionnés en un seul");
+  };
+
   const deleteDetailSale = (id) => {
     const sale = data.detailSales.find((s) => s.id === id);
     if (!sale) return;
@@ -1872,7 +1914,7 @@ export default function App({ uid: currentUid, onSignOut }) {
           <SalesTab data={data} productsById={productsById} onAdd={addSale} onBatchAdd={addBatchSales} onPay={(id, a) => recordPayment("sales", id, a)} onDelete={deleteSale} />
         )}
         {tab === "detail" && (
-          <DetailTab data={data} totals={totals} productsById={productsById} onOpen={openPack} onSell={addDetailSale} onPay={(id, a) => recordPayment("detailSales", id, a)} onDeleteSale={deleteDetailSale} onDeleteOpening={deleteOpening} onForceCloseOpening={forceCloseOpening} />
+          <DetailTab data={data} totals={totals} productsById={productsById} onOpen={openPack} onSell={addDetailSale} onPay={(id, a) => recordPayment("detailSales", id, a)} onDeleteSale={deleteDetailSale} onDeleteOpening={deleteOpening} onForceCloseOpening={forceCloseOpening} onMergeLots={mergeOrphanDetailLots} />
         )}
         {tab === "clients" && (
           <ClientsTab
@@ -2878,7 +2920,7 @@ function SalesTab({ data, productsById, onAdd, onBatchAdd, onDelete }) {
 
 /* ------------------------------- Vente détail ----------------------------- */
 
-function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, onDeleteOpening, onForceCloseOpening }) {
+function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, onDeleteOpening, onForceCloseOpening, onMergeLots }) {
   const [brand, setBrand] = useState("VOLTIC");
   const [openId, setOpenId] = useState("");
   const [openDate, setOpenDate] = useState(todayISO());
@@ -2923,6 +2965,10 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
 
   const openingsList = data.openings.slice(0, 30);
 
+  // Produits dont le stock détail est éclaté en plusieurs lots séparés —
+  // souvent des restes de l'ancien bug de restitution, à fusionner.
+  const fragmentedProducts = data.products.filter((p) => (data.lots[p.id]?.detail || []).length > 1);
+
   return (
     <div className="space-y-3">
       <PrintWholeTab label="Imprimer tout l'onglet Détail" />
@@ -2932,6 +2978,28 @@ function DetailTab({ data, totals, productsById, onOpen, onSell, onDeleteSale, o
         sub="Coût des bouteilles déjà ouvertes mais pas encore vendues"
         tone="amber"
       />
+
+      {fragmentedProducts.length > 0 && (
+        <Card>
+          <SectionTitle icon={Scissors}>Lots détail fragmentés</SectionTitle>
+          <p className="text-xs text-slate-500 mb-2">
+            Ces articles ont plusieurs lots détail séparés (souvent des restes de l'ancien bug de restitution) — les fusionner ne
+            change ni ne supprime aucune unité, ça regroupe juste tout en un seul lot propre.
+          </p>
+          <ul className="divide-y divide-slate-100">
+            {fragmentedProducts.map((p) => (
+              <li key={p.id} className="py-1.5 flex items-center justify-between text-sm">
+                <span>
+                  {p.brand} {p.format} — {(data.lots[p.id]?.detail || []).length} lots
+                </span>
+                <Btn kind="ghost" onClick={() => onMergeLots(p.id)}>
+                  Fusionner
+                </Btn>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div data-print-section="colis-ouverts">
       <Card>
