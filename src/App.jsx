@@ -1176,32 +1176,38 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 
 export default function App({ uid: currentUid, onSignOut }) {
   const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [toast, setToast] = useState(null);
   const pendingRef = useRef(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const remote = await loadData(currentUid);
-        if (remote) {
-          setData(migrate(remote));
-        } else {
-          const d = defaultData();
-          setData(d);
-          await saveData(currentUid, d);
-        }
-      } catch (e) {
+  // Charge les données réelles depuis Firestore. IMPORTANT : en cas d'échec
+  // (réseau, jeton expiré, etc.), on n'écrase JAMAIS avec des données
+  // vierges — ça a déjà causé une vraie perte de données par le passé. On
+  // affiche juste un état d'erreur avec un bouton "Réessayer" ; les
+  // données ne sont créées/écrasées que lors d'un chargement RÉELLEMENT
+  // réussi qui confirme qu'il n'existe encore rien pour ce compte.
+  const loadOnce = useCallback(async () => {
+    setLoadError(false);
+    try {
+      const remote = await loadData(currentUid);
+      if (remote) {
+        setData(migrate(remote));
+      } else {
         const d = defaultData();
         setData(d);
-        try {
-          await saveData(currentUid, d);
-        } catch (_) {}
+        await saveData(currentUid, d);
       }
-    })();
+    } catch (e) {
+      setLoadError(true);
+    }
   }, [currentUid]);
+
+  useEffect(() => {
+    loadOnce();
+  }, [loadOnce]);
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -1275,6 +1281,22 @@ export default function App({ uid: currentUid, onSignOut }) {
     [data]
   );
   const totals = useMemo(() => (data ? computeTotals(data) : null), [data]);
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-teal-50 text-slate-600 px-6">
+        <div className="flex flex-col items-center gap-3 text-center max-w-sm">
+          <AlertCircle className="text-rose-500" size={32} />
+          <p className="text-sm font-semibold">Impossible de charger tes données.</p>
+          <p className="text-xs text-slate-500">
+            Vérifie ta connexion internet et réessaie. Tes données réelles n'ont pas été touchées — rien n'est jamais effacé en cas
+            d'échec de chargement.
+          </p>
+          <Btn onClick={loadOnce}>Réessayer</Btn>
+        </div>
+      </div>
+    );
+  }
 
   if (!data) {
     return (
@@ -2436,7 +2458,7 @@ function Dashboard({ data, totals, productsById }) {
 
   const lastExport = data.meta.lastExportAt ? new Date(data.meta.lastExportAt) : null;
   const daysSinceExport = lastExport ? Math.round((Date.now() - lastExport.getTime()) / 86400000) : null;
-  const exportOverdue = daysSinceExport === null || daysSinceExport > 3;
+  const exportOverdue = daysSinceExport === null || daysSinceExport >= 1;
 
   // Rapport imprimable : synthèse de toutes les rubriques (ventes, achats,
   // dépenses, bénéfice) sur une période libre (du ... au ...), avec des
@@ -4956,7 +4978,7 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
           Tes données sont enregistrées automatiquement à chaque action. Par précaution, tu peux aussi exporter un fichier de
           sauvegarde à tout moment, et le réimporter plus tard si besoin (par ex. en cas de problème technique).
         </p>
-        <p className={`text-xs mb-2 font-medium ${daysSinceExport === null || daysSinceExport > 3 ? "text-amber-600" : "text-teal-700"}`}>
+        <p className={`text-xs mb-2 font-medium ${daysSinceExport === null || daysSinceExport >= 1 ? "text-amber-600" : "text-teal-700"}`}>
           {lastExport
             ? `Dernière sauvegarde exportée : ${lastExport.toLocaleDateString("fr-FR", { timeZone: "UTC" })} (il y a ${daysSinceExport} j)`
             : "Aucune sauvegarde exportée pour l'instant — pense à en faire une !"}
