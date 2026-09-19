@@ -3,7 +3,7 @@ import {
   Droplet, ShoppingCart, Users, Wallet, Package, PiggyBank, Settings,
   LayoutDashboard, Plus, X, Check, AlertCircle, TrendingUp, TrendingDown,
   Boxes, HandCoins, Scissors, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight,
-  Calendar, Trash2, Receipt, Printer, Recycle
+  Calendar, Trash2, Receipt, Printer, Recycle, Truck
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -1044,7 +1044,7 @@ function defaultData() {
     });
   });
   return {
-    meta: { initialCash: 0, startingCapital: 1000000, startDate, createdAt: new Date().toISOString(), lotSeq },
+    meta: { initialCash: 0, startingCapital: 1000000, startDate, createdAt: new Date().toISOString(), lotSeq, familyShare: { waterOwnerPct: 5 } },
     products: buildDefaultProducts(),
     lots,
     sales: [],
@@ -1069,6 +1069,7 @@ function defaultData() {
     recyclingCollections: [],
     recyclingSales: [],
     depletedLots: [],
+    transport: null, // activité tricycle — configurée à la demande via l'onglet dédié
   };
 }
 
@@ -1081,6 +1082,9 @@ function migrate(d) {
   if (!d.recyclingCollections) d = { ...d, recyclingCollections: [] };
   if (!d.recyclingSales) d = { ...d, recyclingSales: [] };
   if (!d.depletedLots) d = { ...d, depletedLots: [] };
+  if (d.transport === undefined) d = { ...d, transport: null };
+  if (d.transport && !d.transport.loans) d = { ...d, transport: { ...d.transport, loans: [] } };
+  if (!d.meta.familyShare) d = { ...d, meta: { ...d.meta, familyShare: { waterOwnerPct: 5 } } };
   if (d.sales && d.sales.some((s) => !s.payments)) {
     d = {
       ...d,
@@ -1183,12 +1187,6 @@ export default function App({ uid: currentUid, onSignOut }) {
   const [toast, setToast] = useState(null);
   const pendingRef = useRef(null);
 
-  // Charge les données réelles depuis Firestore. IMPORTANT : en cas d'échec
-  // (réseau, jeton expiré, etc.), on n'écrase JAMAIS avec des données
-  // vierges — ça a déjà causé une vraie perte de données par le passé. On
-  // affiche juste un état d'erreur avec un bouton "Réessayer" ; les
-  // données ne sont créées/écrasées que lors d'un chargement RÉELLEMENT
-  // réussi qui confirme qu'il n'existe encore rien pour ce compte.
   const loadOnce = useCallback(async () => {
     setLoadError(false);
     try {
@@ -1888,6 +1886,14 @@ export default function App({ uid: currentUid, onSignOut }) {
     showToast("Compteur de lots mis à jour");
   };
 
+  // Part permanente de chacun dans le business Eau (business familial —
+  // pas un prêt à rembourser : un pourcentage fixe de la valeur nette, en
+  // continu, pas juste sur un excédent au-delà d'un objectif).
+  const setFamilyShare = (waterOwnerPct) => {
+    persist({ ...data, meta: { ...data.meta, familyShare: { waterOwnerPct: Number(waterOwnerPct) || 0 } } });
+    showToast("Répartition mise à jour");
+  };
+
   // Suppression manuelle d'un lot depuis le registre complet — même sécurité
   // que partout ailleurs (uniquement si rien n'a encore été vendu dessus).
   // Nettoie aussi tout réappro/ouverture qui pointerait dessus (normalement
@@ -1923,6 +1929,145 @@ export default function App({ uid: currentUid, onSignOut }) {
     });
     showToast("Lot épuisé ajouté à l'historique");
   };
+
+  /* ------------------------- Activité Transport ------------------------- */
+  // Deuxième activité familiale (tricycle) : capital, actifs amortissables,
+  // recettes de courses partagées 50/50 avec le chauffeur, dépenses.
+  // Complètement indépendante du business eau — n'affecte jamais son stock,
+  // ses ventes ou son bilan.
+
+  const setupTransport = (config) => {
+    persist({
+      ...data,
+      transport: {
+        meta: {
+          startDate: config.startDate,
+          investorContribution: config.investorContribution,
+          ownerContribution: config.ownerContribution,
+        },
+        assets: config.assets, // [{ id, label, cost, purchaseDate, depreciationYears }]
+        trips: [],
+        expenses: [],
+        loans: [],
+      },
+    });
+    showToast("Activité Transport configurée");
+  };
+
+  const addTransportTrip = (trip) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, trips: [{ id: uid(), ...trip }, ...data.transport.trips] },
+    });
+    showToast("Recette de course enregistrée");
+  };
+
+  const deleteTransportTrip = (id) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, trips: data.transport.trips.filter((t) => t.id !== id) },
+    });
+    showToast("Recette supprimée");
+  };
+
+  const addTransportExpense = (expense) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, expenses: [{ id: uid(), ...expense }, ...data.transport.expenses] },
+    });
+    showToast("Dépense transport enregistrée");
+  };
+
+  const deleteTransportExpense = (id) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, expenses: data.transport.expenses.filter((e) => e.id !== id) },
+    });
+    showToast("Dépense supprimée");
+  };
+
+  const addTransportAsset = (asset) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, assets: [...data.transport.assets, { id: uid(), ...asset }] },
+    });
+    showToast("Actif ajouté");
+  };
+
+  const deleteTransportAsset = (id) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, assets: data.transport.assets.filter((a) => a.id !== id) },
+    });
+    showToast("Actif supprimé");
+  };
+
+  // Rien n'est figé après le démarrage : le capital (apports) et le coût de
+  // chaque actif restent modifiables à tout moment, à mesure que les vrais
+  // montants se précisent — le pourcentage de chacun se recalcule aussitôt.
+  const updateTransportMeta = (patch) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, meta: { ...data.transport.meta, ...patch } },
+    });
+    showToast("Capital Transport mis à jour");
+  };
+
+  const updateTransportAsset = (id, patch) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, assets: data.transport.assets.map((a) => (a.id === id ? { ...a, ...patch } : a)) },
+    });
+    showToast("Actif mis à jour");
+  };
+
+  // Petites avances que ta compagne prend sur la trésorerie Transport pour
+  // un besoin urgent — même mécanique que les prêts de l'eau : ça sort de la
+  // trésorerie mais reste une créance (donc la valeur nette Transport ne
+  // change pas tant que ce n'est pas remboursé, ni perdu).
+  const addTransportLoan = (loan) => {
+    persist({
+      ...data,
+      transport: { ...data.transport, loans: [{ id: uid(), repayments: [], ...loan }, ...data.transport.loans] },
+    });
+    showToast("Avance enregistrée");
+  };
+
+  const repayTransportLoan = (id, amount, date) => {
+    const loan = data.transport.loans.find((l) => l.id === id);
+    if (!loan) return;
+    const remaining = loan.amount - repaidAmount(loan);
+    const capped = Math.max(0, Math.min(amount, remaining));
+    if (capped <= 0) return;
+    const record = { id: uid(), date: date || todayISO(), amount: capped };
+    persist({
+      ...data,
+      transport: {
+        ...data.transport,
+        loans: data.transport.loans.map((l) => (l.id === id ? { ...l, repayments: [record, ...(l.repayments || [])] } : l)),
+      },
+    });
+    showToast("Remboursement enregistré");
+  };
+
+  const deleteTransportLoan = (id) => {
+    persist({ ...data, transport: { ...data.transport, loans: data.transport.loans.filter((l) => l.id !== id) } });
+    showToast("Avance supprimée");
+  };
+
+  const deleteTransportLoanRepayment = (loanId, repaymentId) => {
+    persist({
+      ...data,
+      transport: {
+        ...data.transport,
+        loans: data.transport.loans.map((l) =>
+          l.id === loanId ? { ...l, repayments: (l.repayments || []).filter((r) => r.id !== repaymentId) } : l
+        ),
+      },
+    });
+    showToast("Remboursement annulé");
+  };
+
 
   // Nouvelle marque ou nouveau format ajouté manuellement — démarre avec un
   // stock vide (à réapprovisionner ensuite normalement).
@@ -1980,6 +2125,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     { key: "stock", label: "Stock", icon: Boxes },
     { key: "expenses", label: "Dépenses", icon: Receipt },
     { key: "recycling", label: "Recyclage", icon: Recycle },
+    { key: "transport", label: "Transport", icon: Truck },
     { key: "balance", label: "Bilan", icon: PiggyBank },
     { key: "settings", label: "Produits", icon: Settings },
   ];
@@ -2072,6 +2218,24 @@ export default function App({ uid: currentUid, onSignOut }) {
             onDeleteSale={deleteRecyclingSale}
           />
         )}
+        {tab === "transport" && (
+          <TransportTab
+            data={data}
+            onSetup={setupTransport}
+            onAddTrip={addTransportTrip}
+            onDeleteTrip={deleteTransportTrip}
+            onAddExpense={addTransportExpense}
+            onDeleteExpense={deleteTransportExpense}
+            onAddAsset={addTransportAsset}
+            onDeleteAsset={deleteTransportAsset}
+            onUpdateMeta={updateTransportMeta}
+            onUpdateAsset={updateTransportAsset}
+            onAddLoan={addTransportLoan}
+            onRepayLoan={repayTransportLoan}
+            onDeleteLoan={deleteTransportLoan}
+            onDeleteLoanRepayment={deleteTransportLoanRepayment}
+          />
+        )}
         {tab === "balance" && (
           <BalanceTab
             data={data}
@@ -2084,6 +2248,7 @@ export default function App({ uid: currentUid, onSignOut }) {
             onDeleteWithdrawal={deleteWithdrawal}
             onAddPersonalNote={addPersonalNote}
             onDeletePersonalNote={deletePersonalNote}
+            onSetFamilyShare={setFamilyShare}
           />
         )}
         {tab === "settings" && <SettingsTab data={data} onUpdate={updateProduct} onAddProduct={addProduct} onRestore={restoreData} onExported={markExported} onSetLotSeq={setLotSeq} onDeleteLot={deleteLotManually} onAddDepletedLot={addDepletedLotManually} />}
@@ -2121,6 +2286,135 @@ export default function App({ uid: currentUid, onSignOut }) {
 }
 
 /* ------------------------------ Calculs -------------------------------- */
+
+// Amortissement linéaire, plafonné à la valeur d'achat (jamais négatif),
+// calculé en jours écoulés depuis l'achat pour rester cohérent avec le
+// reste de l'app (UTC/Lomé, pas de fuseau horaire).
+function daysBetweenUTC(dateA, dateB) {
+  const a = new Date(dateA + "T00:00:00Z");
+  const b = new Date(dateB + "T00:00:00Z");
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+function assetDepreciation(asset, asOfDate) {
+  const elapsedDays = daysBetweenUTC(asset.purchaseDate, asOfDate);
+  const totalDays = asset.depreciationYears * 365;
+  const rate = Math.min(1, elapsedDays / totalDays);
+  const depreciation = asset.cost * rate;
+  return { depreciation, netValue: asset.cost - depreciation };
+}
+
+// Activité tricycle : partage 50/50 des recettes de courses avec le
+// chauffeur (le carburant reste entièrement à sa charge, sur sa moitié) ;
+// l'entretien est partagé 50/50 ; toute autre dépense reste à 100% côté
+// propriétaire (assurance, taxes...).
+function computeTransportTotals(transport, asOfDate) {
+  if (!transport) return null;
+  const today = asOfDate || todayISO();
+  const targetCapital = transport.meta.investorContribution + transport.meta.ownerContribution;
+  const ownerPct = (transport.meta.ownerContribution / targetCapital) * 100;
+  const assetsCost = transport.assets.reduce((s, a) => s + a.cost, 0);
+  // Fonds de roulement de départ = capital total - coût des actifs achetés.
+  // Toujours recalculé, jamais figé : si un coût d'actif ou un apport est
+  // corrigé plus tard, le fonds de roulement de départ suit automatiquement.
+  const initialWorkingCapital = targetCapital - assetsCost;
+  const grossTrips = transport.trips.reduce((s, t) => s + t.grossAmount, 0);
+  const ownerTripShare = grossTrips / 2;
+  const expensesOwnerCost = transport.expenses.reduce(
+    (s, e) => s + (e.category === "entretien" ? e.amount / 2 : e.amount),
+    0
+  );
+  // Avances (ex : prises par la compagne) : sortent de la trésorerie mais
+  // restent une créance — donc rajoutées telles quelles dans la valeur
+  // nette, jusqu'à remboursement (ou perte assumée manuellement plus tard).
+  const loans = transport.loans || [];
+  const loanedOut = loans.reduce((s, l) => s + l.amount, 0);
+  const loanRepaid = loans.reduce((s, l) => s + repaidAmount(l), 0);
+  const loansOutstanding = loanedOut - loanRepaid;
+  const treasury = initialWorkingCapital + ownerTripShare - expensesOwnerCost - loanedOut + loanRepaid;
+  const assetsDetail = transport.assets.map((a) => ({ ...a, ...assetDepreciation(a, today) }));
+  const totalDepreciation = assetsDetail.reduce((s, a) => s + a.depreciation, 0);
+  const assetsNetValue = assetsDetail.reduce((s, a) => s + a.netValue, 0);
+  const netWorth = treasury + assetsNetValue + loansOutstanding;
+  const accountingResult = treasury - initialWorkingCapital - totalDepreciation;
+  return {
+    grossTrips,
+    ownerTripShare,
+    expensesOwnerCost,
+    initialWorkingCapital,
+    loansOutstanding,
+    treasury,
+    assetsDetail,
+    totalDepreciation,
+    assetsNetValue,
+    targetCapital,
+    ownerPct,
+    netWorth,
+    accountingResult,
+    netResult: netWorth - targetCapital,
+  };
+}
+
+// Bénéfice Famille du mois en cours : combine Eau et Transport, sans jamais
+// mélanger leurs chiffres bruts — chacun garde sa propre logique, puis on
+// additionne. Distingue trois choses : la réserve de renouvellement
+// (amortissement transport, déjà exclue du résultat), ce qui doit encore
+// combler l'objectif investisseur cumulé (Eau + Transport), et ce qui reste
+// vraiment disponible pour la famille sans mettre l'activité en danger.
+function computeFamilyMonthlyProfit(data, waterTotals) {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const inMonth = (dateStr) => {
+    const d = new Date(dateStr + "T00:00:00Z");
+    return d.getUTCFullYear() === year && d.getUTCMonth() === month;
+  };
+
+  // Eau : bénéfice du mois (déjà calculé) net des dépenses du mois (transport,
+  // communication, etc.) — plus honnête que la marge brute seule pour une
+  // vraie vue "famille".
+  const waterExpensesThisMonth = data.expenses.filter((e) => inMonth(e.date)).reduce((s, e) => s + e.amount, 0);
+  const waterProfit = waterTotals.month.profit - waterExpensesThisMonth;
+
+  // Transport : recettes et dépenses du mois, moins la part mensuelle
+  // d'amortissement (réserve de renouvellement).
+  let transportProfit = 0;
+  let transportReserve = 0;
+  if (data.transport) {
+    const t = data.transport;
+    const grossTrips = t.trips.filter((x) => inMonth(x.date)).reduce((s, x) => s + x.grossAmount, 0);
+    const ownerShare = grossTrips / 2;
+    const expensesOwnerCost = t.expenses
+      .filter((x) => inMonth(x.date))
+      .reduce((s, x) => s + (x.category === "entretien" ? x.amount / 2 : x.amount), 0);
+    transportReserve = t.assets.reduce((s, a) => s + a.cost / (a.depreciationYears * 12), 0);
+    transportProfit = ownerShare - expensesOwnerCost - transportReserve;
+  }
+
+  const familyProfit = waterProfit + transportProfit;
+
+  // Répartition réelle du bénéfice du mois entre les deux — chaque activité
+  // applique son propre pourcentage permanent, pas un partage global unique.
+  const waterOwnerPct = data.meta.familyShare?.waterOwnerPct ?? 5;
+  const transportOwnerPct = data.transport
+    ? (data.transport.meta.ownerContribution /
+        (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
+      100
+    : 100;
+  const essoweProfit = (waterProfit * waterOwnerPct) / 100 + (transportProfit * transportOwnerPct) / 100;
+  const compagneProfit = familyProfit - essoweProfit;
+
+  return {
+    waterProfit,
+    transportProfit,
+    transportReserve,
+    familyProfit,
+    waterOwnerPct,
+    transportOwnerPct,
+    essoweProfit,
+    compagneProfit,
+  };
+}
 
 function computeTotals(data) {
   const paidSales = data.sales.reduce((s, x) => s + x.paidAmount, 0);
@@ -2434,6 +2728,7 @@ function DateNav({ value, onChange }) {
 
 function Dashboard({ data, totals, productsById }) {
   const brands = brandsOf(data.products);
+  const familyMonthly = useMemo(() => computeFamilyMonthlyProfit(data, totals), [data, totals]);
   const [journalDate, setJournalDate] = useState(todayISO());
   const journalOps = useMemo(
     () => totals.allOps.filter((o) => o.date === journalDate).sort((a, b) => (a.id < b.id ? 1 : -1)),
@@ -2458,7 +2753,7 @@ function Dashboard({ data, totals, productsById }) {
 
   const lastExport = data.meta.lastExportAt ? new Date(data.meta.lastExportAt) : null;
   const daysSinceExport = lastExport ? Math.round((Date.now() - lastExport.getTime()) / 86400000) : null;
-  const exportOverdue = daysSinceExport === null || daysSinceExport >= 1;
+  const exportOverdue = daysSinceExport === null || daysSinceExport > 3;
 
   // Rapport imprimable : synthèse de toutes les rubriques (ventes, achats,
   // dépenses, bénéfice) sur une période libre (du ... au ...), avec des
@@ -2593,6 +2888,38 @@ function Dashboard({ data, totals, productsById }) {
         <StatCard label="Bénéfice jour" value={fcfa(totals.today.profit)} sub={`${totals.today.count} vente(s)`} />
         <StatCard label="Bénéfice mois" value={fcfa(totals.month.profit)} tone="slate" />
         <StatCard label="Bénéfice année" value={fcfa(totals.year.profit)} tone="slate" />
+      </div>
+
+      <div data-print-section="benefice-famille">
+      <Card>
+        <SectionTitle icon={PiggyBank}>Bénéfice Famille du mois</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Combine Eau et Transport{data.transport ? "" : " (Transport pas encore configuré)"} — net des dépenses du mois et, pour le
+          Transport, de sa réserve de renouvellement (amortissement). Réparti selon la part permanente de chacun.
+        </p>
+        <Row label="Bénéfice Eau (net des dépenses du mois)" value={fcfa(familyMonthly.waterProfit)} />
+        {data.transport && <Row label="Bénéfice Transport (net de la réserve)" value={fcfa(familyMonthly.transportProfit)} />}
+        {data.transport && <Row label="— dont réserve de renouvellement mise de côté" value={fcfa(familyMonthly.transportReserve)} />}
+        <Row label="Bénéfice Famille total du mois" value={fcfa(familyMonthly.familyProfit)} bold />
+        <div className="my-2 border-t border-slate-100" />
+        <Row
+          label={`Ta part réelle (${familyMonthly.waterOwnerPct}% Eau${data.transport ? ` + ${familyMonthly.transportOwnerPct.toFixed(1)}% Transport` : ""})`}
+          value={fcfa(familyMonthly.essoweProfit)}
+          bold
+          tone="teal"
+        />
+        <Row label="Part réelle de ta compagne" value={fcfa(familyMonthly.compagneProfit)} bold />
+      </Card>
+      <PrintOrCopy
+        printKey="benefice-famille"
+        getText={() =>
+          `Bénéfice Famille du mois — Multivers'Eau\n` +
+          `Bénéfice Eau : ${fcfa(familyMonthly.waterProfit)}\n` +
+          (data.transport ? `Bénéfice Transport : ${fcfa(familyMonthly.transportProfit)} (réserve : ${fcfa(familyMonthly.transportReserve)})\n` : "") +
+          `Bénéfice Famille total : ${fcfa(familyMonthly.familyProfit)}\n` +
+          `Ta part réelle : ${fcfa(familyMonthly.essoweProfit)}\nPart réelle compagne : ${fcfa(familyMonthly.compagneProfit)}`
+        }
+      />
       </div>
 
       <Card data-print-section="journal">
@@ -4560,6 +4887,592 @@ function RecyclingTab({ data, totals, productsById, onAddCollection, onDeleteCol
   );
 }
 
+/* -------------------------------- Transport ------------------------------- */
+// Activité familiale tricycle : capital investi (investisseur + propriétaire),
+// actifs amortissables, recettes de courses partagées 50/50 avec le
+// chauffeur (carburant à 100% à sa charge), dépenses d'entretien partagées
+// 50/50, autres dépenses (assurance, taxes) à 100% côté propriétaire.
+// Totalement indépendante du business eau.
+
+function TransportTab({ data, onSetup, onAddTrip, onDeleteTrip, onAddExpense, onDeleteExpense, onAddAsset, onDeleteAsset, onUpdateMeta, onUpdateAsset, onAddLoan, onRepayLoan, onDeleteLoan, onDeleteLoanRepayment }) {
+  const [setupForm, setSetupForm] = useState({
+    startDate: todayISO(),
+    investorContribution: "450000",
+    ownerContribution: "1450000",
+    assets: [
+      { label: "Tricycle", cost: "1660000", purchaseDate: todayISO(), depreciationYears: "5" },
+      { label: "Traceur GPS / kill switch (prix à confirmer)", cost: "0", purchaseDate: todayISO(), depreciationYears: "5" },
+      { label: "Téléphone Android (suivi)", cost: "80000", purchaseDate: todayISO(), depreciationYears: "2" },
+    ],
+  });
+
+  const updateSetupAsset = (idx, patch) => {
+    setSetupForm((f) => ({ ...f, assets: f.assets.map((a, i) => (i === idx ? { ...a, ...patch } : a)) }));
+  };
+  const addSetupAssetRow = () => {
+    setSetupForm((f) => ({ ...f, assets: [...f.assets, { label: "", cost: "", purchaseDate: todayISO(), depreciationYears: "5" }] }));
+  };
+  const removeSetupAssetRow = (idx) => {
+    setSetupForm((f) => ({ ...f, assets: f.assets.filter((_, i) => i !== idx) }));
+  };
+
+  const submitSetup = () => {
+    const assets = setupForm.assets
+      .filter((a) => a.label && Number(a.cost) > 0)
+      .map((a) => ({
+        id: uid(),
+        label: a.label,
+        cost: Number(a.cost),
+        purchaseDate: a.purchaseDate,
+        depreciationYears: Number(a.depreciationYears) || 5,
+      }));
+    onSetup({
+      startDate: setupForm.startDate,
+      investorContribution: Number(setupForm.investorContribution) || 0,
+      ownerContribution: Number(setupForm.ownerContribution) || 0,
+      assets,
+    });
+  };
+
+  if (!data.transport) {
+    const totalAssets = setupForm.assets.reduce((s, a) => s + (Number(a.cost) || 0), 0);
+    const totalCapital = (Number(setupForm.investorContribution) || 0) + (Number(setupForm.ownerContribution) || 0);
+    const impliedWorkingCapital = totalCapital - totalAssets;
+    return (
+      <div className="space-y-3">
+        <Card>
+          <SectionTitle icon={Truck}>Configurer l'activité Transport (tricycle)</SectionTitle>
+          <p className="text-xs text-slate-500 mb-2">
+            Deuxième activité familiale, complètement séparée du business eau. Cette configuration initiale sert de point de
+            départ — les apports, le capital et le coût de chaque actif restent <b>modifiables à tout moment</b> ensuite (dans le
+            tableau de bord de l'activité), à mesure que les vrais montants se précisent. Le pourcentage de chacun se recalcule
+            automatiquement à chaque changement.
+          </p>
+          <p className="text-xs text-amber-600 mb-2">
+            La plaque d'immatriculation et la première vidange ne sont pas des actifs (ils ne se revendent pas) — une fois
+            l'activité démarrée, enregistre-les comme des dépenses normales (catégorie "Autre"), datées du jour de démarrage. Ça
+            réduira ta trésorerie de départ du bon montant, sans fausser la valeur de tes actifs.
+          </p>
+          <div className="mb-2">
+            <label className="text-xs text-slate-400">Date de démarrage</label>
+            <Input type="date" value={setupForm.startDate} onChange={(e) => setSetupForm({ ...setupForm, startDate: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <label className="text-xs text-slate-400">Apport investisseur</label>
+              <Input
+                type="number"
+                value={setupForm.investorContribution}
+                onChange={(e) => setSetupForm({ ...setupForm, investorContribution: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Ton apport</label>
+              <Input
+                type="number"
+                value={setupForm.ownerContribution}
+                onChange={(e) => setSetupForm({ ...setupForm, ownerContribution: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="text-xs font-bold text-slate-600 mt-3 mb-1">Actifs (amortis dans le temps)</div>
+          {setupForm.assets.map((a, idx) => (
+            <div key={idx} className="border border-slate-100 rounded-lg p-2 mb-2">
+              <Input
+                placeholder="Libellé (ex: Tricycle + traceur)"
+                value={a.label}
+                onChange={(e) => updateSetupAsset(idx, { label: e.target.value })}
+                className="mb-2"
+              />
+              <div className="grid grid-cols-3 gap-2 items-end">
+                <div>
+                  <label className="text-xs text-slate-400">Coût</label>
+                  <Input type="number" value={a.cost} onChange={(e) => updateSetupAsset(idx, { cost: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Amorti sur (ans)</label>
+                  <Input
+                    type="number"
+                    value={a.depreciationYears}
+                    onChange={(e) => updateSetupAsset(idx, { depreciationYears: e.target.value })}
+                  />
+                </div>
+                <ConfirmDeleteButton size={14} onConfirm={() => removeSetupAssetRow(idx)} label={`Retirer "${a.label || "cet actif"}" de la liste ?`} />
+              </div>
+            </div>
+          ))}
+          <Btn kind="ghost" onClick={addSetupAssetRow} className="w-full mb-3">
+            <Plus size={16} /> Ajouter un actif
+          </Btn>
+
+          <div className="bg-slate-50 rounded-xl p-2 text-xs text-slate-600 mb-3">
+            <div className="flex justify-between">
+              <span>Total actifs</span>
+              <span className="font-mono">{fcfa(totalAssets)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Capital total (investisseur + toi)</span>
+              <span className="font-mono">{fcfa(totalCapital)}</span>
+            </div>
+            <div className="flex justify-between font-semibold">
+              <span>Fonds de roulement de départ (calculé, jamais figé)</span>
+              <span className={`font-mono ${impliedWorkingCapital < 0 ? "text-rose-600" : "text-teal-700"}`}>
+                {fcfa(impliedWorkingCapital)}
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            Ce montant se recalcule automatiquement (capital total − coût des actifs) — tu n'as rien à saisir toi-même ici, ni
+            maintenant ni plus tard si tu corriges un coût.
+          </p>
+
+          <Btn onClick={submitSetup} className="w-full">
+            <Check size={16} /> Démarrer l'activité Transport
+          </Btn>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <TransportDashboard
+      data={data}
+      onAddTrip={onAddTrip}
+      onDeleteTrip={onDeleteTrip}
+      onAddExpense={onAddExpense}
+      onDeleteExpense={onDeleteExpense}
+      onAddAsset={onAddAsset}
+      onDeleteAsset={onDeleteAsset}
+      onUpdateMeta={onUpdateMeta}
+      onUpdateAsset={onUpdateAsset}
+      onAddLoan={onAddLoan}
+      onRepayLoan={onRepayLoan}
+      onDeleteLoan={onDeleteLoan}
+      onDeleteLoanRepayment={onDeleteLoanRepayment}
+    />
+  );
+}
+
+const TRANSPORT_EXPENSE_CATEGORIES = [
+  { value: "entretien", label: "Entretien (partagé 50/50)" },
+  { value: "assurance", label: "Assurance / Taxes" },
+  { value: "autre", label: "Autre" },
+];
+
+function TransportDashboard({ data, onAddTrip, onDeleteTrip, onAddExpense, onDeleteExpense, onAddAsset, onDeleteAsset, onUpdateMeta, onUpdateAsset, onAddLoan, onRepayLoan, onDeleteLoan, onDeleteLoanRepayment }) {
+  const t = data.transport;
+  const totals = useMemo(() => computeTransportTotals(t, todayISO()), [t]);
+  const [tripForm, setTripForm] = useState({ date: todayISO(), grossAmount: "", note: "" });
+  const [expenseForm, setExpenseForm] = useState({ date: todayISO(), category: "entretien", label: "", amount: "" });
+  const [assetForm, setAssetForm] = useState({ label: "", cost: "", purchaseDate: todayISO(), depreciationYears: "5" });
+  const [loanForm, setLoanForm] = useState({ date: todayISO(), beneficiary: "", amount: "", note: "" });
+  const [repayId, setRepayId] = useState(null);
+  const [repayAmt, setRepayAmt] = useState("");
+  const [expandedLoan, setExpandedLoan] = useState(null);
+  const [capitalEdit, setCapitalEdit] = useState({ investorContribution: undefined, ownerContribution: undefined });
+  const [assetEdits, setAssetEdits] = useState({}); // { [assetId]: { cost, depreciationYears } }
+
+  const submitTrip = () => {
+    const gross = Number(tripForm.grossAmount);
+    if (!gross || gross <= 0) return;
+    onAddTrip({ date: tripForm.date, grossAmount: gross, note: tripForm.note });
+    setTripForm({ date: tripForm.date, grossAmount: "", note: "" });
+  };
+  const submitExpense = () => {
+    const amount = Number(expenseForm.amount);
+    if (!amount || amount <= 0) return;
+    onAddExpense({ date: expenseForm.date, category: expenseForm.category, label: expenseForm.label, amount });
+    setExpenseForm({ date: expenseForm.date, category: expenseForm.category, label: "", amount: "" });
+  };
+  const submitAsset = () => {
+    const cost = Number(assetForm.cost);
+    if (!assetForm.label || !cost) return;
+    onAddAsset({ label: assetForm.label, cost, purchaseDate: assetForm.purchaseDate, depreciationYears: Number(assetForm.depreciationYears) || 5 });
+    setAssetForm({ label: "", cost: "", purchaseDate: assetForm.purchaseDate, depreciationYears: "5" });
+  };
+
+  const submitLoan = () => {
+    if (!loanForm.beneficiary || !loanForm.amount) return;
+    onAddLoan({ date: loanForm.date, beneficiary: loanForm.beneficiary, amount: Number(loanForm.amount), note: loanForm.note });
+    setLoanForm({ date: loanForm.date, beneficiary: "", amount: "", note: "" });
+  };
+
+  const investorContribution = capitalEdit.investorContribution ?? t.meta.investorContribution;
+  const ownerContribution = capitalEdit.ownerContribution ?? t.meta.ownerContribution;
+  const previewOwnerPct = (Number(ownerContribution) / (Number(ownerContribution) + Number(investorContribution))) * 100 || 0;
+  const submitCapital = () => {
+    onUpdateMeta({
+      investorContribution: Number(investorContribution) || 0,
+      ownerContribution: Number(ownerContribution) || 0,
+    });
+    setCapitalEdit({ investorContribution: undefined, ownerContribution: undefined });
+  };
+
+  const tripGrossOwnerShare = (Number(tripForm.grossAmount) || 0) / 2;
+  const expenseOwnerCost = expenseForm.category === "entretien" ? (Number(expenseForm.amount) || 0) / 2 : Number(expenseForm.amount) || 0;
+
+  return (
+    <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Transport" />
+
+      <Card>
+        <SectionTitle icon={Wallet}>Capital — modifiable à tout moment</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Rien n'est figé : ajuste les apports à mesure que les vrais montants se précisent — le pourcentage de chacun se recalcule
+          automatiquement.
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div>
+            <label className="text-xs text-slate-400">Apport investisseur</label>
+            <Input
+              type="number"
+              value={investorContribution}
+              onChange={(e) => setCapitalEdit({ ...capitalEdit, investorContribution: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400">Ton apport</label>
+            <Input
+              type="number"
+              value={ownerContribution}
+              onChange={(e) => setCapitalEdit({ ...capitalEdit, ownerContribution: e.target.value })}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 mb-2">
+          Répartition résultante : <b className="text-teal-700">{previewOwnerPct.toFixed(1)}% toi</b> /{" "}
+          <b>{(100 - previewOwnerPct).toFixed(1)}% compagne</b>
+        </p>
+        <p className="text-xs text-slate-500 mb-2">
+          Fonds de roulement de départ (capital − coût des actifs, recalculé automatiquement) :{" "}
+          <b className={totals.initialWorkingCapital < 0 ? "text-rose-600" : "text-teal-700"}>{fcfa(totals.initialWorkingCapital)}</b>
+        </p>
+        <Btn onClick={submitCapital} className="w-full">
+          <Check size={16} /> Mettre à jour le capital
+        </Btn>
+      </Card>
+
+      <div data-print-section="transport-resume">
+      <Card>
+        <SectionTitle icon={Truck}>Activité Transport — résumé</SectionTitle>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <StatCard label="Trésorerie transport" value={fcfa(totals.treasury)} tone={totals.treasury >= 0 ? "teal" : "rose"} />
+          <StatCard label="Valeur nette des actifs" value={fcfa(totals.assetsNetValue)} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <StatCard label={`Ta part réelle (${totals.ownerPct.toFixed(1)}%)`} value={fcfa(totals.netWorth * (totals.ownerPct / 100))} tone="teal" />
+          <StatCard
+            label={`Part compagne (${(100 - totals.ownerPct).toFixed(1)}%)`}
+            value={fcfa(totals.netWorth * ((100 - totals.ownerPct) / 100))}
+            tone="amber"
+          />
+        </div>
+        <p className="text-xs text-slate-400 mt-2">
+          Recettes brutes cumulées : {fcfa(totals.grossTrips)} — ta part (50%) : {fcfa(totals.ownerTripShare)}. Amortissement cumulé
+          des actifs : {fcfa(totals.totalDepreciation)}. Part permanente, proportionnelle à l'apport de chacun (450 000 F elle /{" "}
+          {fcfa(t.meta.ownerContribution)} toi).
+        </p>
+      </Card>
+      <PrintOrCopy
+        printKey="transport-resume"
+        getText={() =>
+          `Transport — Multivers'Eau\nTrésorerie : ${fcfa(totals.treasury)}\nValeur nette actifs : ${fcfa(totals.assetsNetValue)}\n` +
+          `Ta part (${totals.ownerPct.toFixed(1)}%) : ${fcfa(totals.netWorth * (totals.ownerPct / 100))}\n` +
+          `Part compagne (${(100 - totals.ownerPct).toFixed(1)}%) : ${fcfa(totals.netWorth * ((100 - totals.ownerPct) / 100))}`
+        }
+      />
+      </div>
+
+      <Card>
+        <SectionTitle icon={Truck}>Nouvelle recette de course</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Saisis le montant BRUT collecté par le chauffeur — l'app calcule automatiquement ta part (50%), le reste lui revient
+          (carburant compris).
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="date" value={tripForm.date} onChange={(e) => setTripForm({ ...tripForm, date: e.target.value })} />
+          <Input
+            type="number"
+            placeholder="Montant brut du jour"
+            value={tripForm.grossAmount}
+            onChange={(e) => setTripForm({ ...tripForm, grossAmount: e.target.value })}
+          />
+        </div>
+        <Input placeholder="Note (optionnel)" value={tripForm.note} onChange={(e) => setTripForm({ ...tripForm, note: e.target.value })} className="mb-2" />
+        {tripForm.grossAmount && (
+          <p className="text-xs text-teal-700 mb-2">Ta part : {fcfa(tripGrossOwnerShare)} — part chauffeur : {fcfa(tripGrossOwnerShare)}</p>
+        )}
+        <Btn onClick={submitTrip} className="w-full">
+          <Plus size={16} /> Enregistrer la recette
+        </Btn>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Receipt}>Nouvelle dépense</SectionTitle>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })} />
+          <Select
+            value={expenseForm.category}
+            onChange={(v) => setExpenseForm({ ...expenseForm, category: v })}
+            options={TRANSPORT_EXPENSE_CATEGORIES}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input placeholder="Détail (optionnel)" value={expenseForm.label} onChange={(e) => setExpenseForm({ ...expenseForm, label: e.target.value })} />
+          <Input type="number" placeholder="Montant" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} />
+        </div>
+        {expenseForm.amount && (
+          <p className="text-xs text-amber-600 mb-2">
+            Sortie réelle de ta trésorerie : {fcfa(expenseOwnerCost)}
+            {expenseForm.category === "entretien" ? " (moitié — le reste est à la charge du chauffeur)" : ""}
+          </p>
+        )}
+        <Btn onClick={submitExpense} className="w-full">
+          <Plus size={16} /> Enregistrer la dépense
+        </Btn>
+      </Card>
+
+      <div data-print-section="transport-recettes">
+      <Card>
+        <SectionTitle icon={Truck}>Historique des recettes</SectionTitle>
+        {t.trips.length === 0 && <p className="text-sm text-slate-400">Aucune recette enregistrée.</p>}
+        <ul className="divide-y divide-slate-100">
+          {t.trips.map((trip) => (
+            <li key={trip.id} className="py-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">
+                  {new Date(trip.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — Brut {fcfa(trip.grossAmount)} — ta part{" "}
+                  {fcfa(trip.grossAmount / 2)}
+                  {trip.note ? ` (${trip.note})` : ""}
+                </span>
+                <ConfirmDeleteButton onConfirm={() => onDeleteTrip(trip.id)} label={`Supprimer cette recette de ${fcfa(trip.grossAmount)} ?`} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      {t.trips.length > 0 && (
+        <PrintOrCopy
+          printKey="transport-recettes"
+          getText={() =>
+            `Historique des recettes — Transport\n\n` +
+            t.trips.map((trip) => `${trip.date} — Brut ${fcfa(trip.grossAmount)} — ta part ${fcfa(trip.grossAmount / 2)}`).join("\n")
+          }
+        />
+      )}
+      </div>
+
+      <div data-print-section="transport-depenses">
+      <Card>
+        <SectionTitle icon={Receipt}>Historique des dépenses</SectionTitle>
+        {t.expenses.length === 0 && <p className="text-sm text-slate-400">Aucune dépense enregistrée.</p>}
+        <ul className="divide-y divide-slate-100">
+          {t.expenses.map((e) => {
+            const ownerCost = e.category === "entretien" ? e.amount / 2 : e.amount;
+            const catLabel = TRANSPORT_EXPENSE_CATEGORIES.find((c) => c.value === e.category)?.label || e.category;
+            return (
+              <li key={e.id} className="py-2 text-sm">
+                <div className="flex justify-between items-start gap-2">
+                  <span className="font-medium">
+                    {catLabel}
+                    {e.label ? <span className="text-slate-400 font-normal"> — {e.label}</span> : null}
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-slate-400">{new Date(e.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</span>
+                    <ConfirmDeleteButton onConfirm={() => onDeleteExpense(e.id)} label={`Supprimer cette dépense (${fcfa(e.amount)}) ?`} />
+                  </span>
+                </div>
+                <div className="text-xs font-mono text-slate-600 mt-0.5">
+                  {fcfa(e.amount)} {e.category === "entretien" && <span className="text-slate-400">(ta part : {fcfa(ownerCost)})</span>}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+      {t.expenses.length > 0 && (
+        <PrintOrCopy
+          printKey="transport-depenses"
+          getText={() =>
+            `Historique des dépenses — Transport\n\n` +
+            t.expenses.map((e) => `${e.date} — ${e.category} — ${fcfa(e.amount)}`).join("\n")
+          }
+        />
+      )}
+      </div>
+
+      <div data-print-section="transport-actifs">
+      <Card>
+        <SectionTitle icon={Boxes}>Actifs & amortissement</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">Modifiable à tout moment — ajuste dès que le vrai coût est connu (ex : le traceur).</p>
+        <ul className="divide-y divide-slate-100 mb-3">
+          {totals.assetsDetail.map((a) => {
+            const edit = assetEdits[a.id] || {};
+            const cost = edit.cost ?? a.cost;
+            const depreciationYears = edit.depreciationYears ?? a.depreciationYears;
+            const purchaseDate = edit.purchaseDate ?? a.purchaseDate;
+            return (
+              <li key={a.id} className="py-2 text-xs">
+                <div className="flex justify-between items-start gap-2 mb-1">
+                  <span className="font-medium text-slate-700">{a.label}</span>
+                  <ConfirmDeleteButton onConfirm={() => onDeleteAsset(a.id)} label={`Supprimer l'actif "${a.label}" du suivi ?`} />
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 mb-1">
+                  <Input
+                    type="number"
+                    value={cost}
+                    onChange={(e) => setAssetEdits({ ...assetEdits, [a.id]: { ...edit, cost: e.target.value } })}
+                  />
+                  <Input
+                    type="date"
+                    value={purchaseDate}
+                    onChange={(e) => setAssetEdits({ ...assetEdits, [a.id]: { ...edit, purchaseDate: e.target.value } })}
+                  />
+                  <Input
+                    type="number"
+                    value={depreciationYears}
+                    onChange={(e) => setAssetEdits({ ...assetEdits, [a.id]: { ...edit, depreciationYears: e.target.value } })}
+                  />
+                </div>
+                <div className="flex items-center justify-between mt-0.5">
+                  <span className="text-slate-400">
+                    Amortissement cumulé : {fcfa(a.depreciation)} — Valeur nette : <b className="text-slate-600">{fcfa(a.netValue)}</b>
+                  </span>
+                  {assetEdits[a.id] && (
+                    <Btn
+                      kind="ghost"
+                      onClick={() => {
+                        onUpdateAsset(a.id, {
+                          cost: Number(cost) || 0,
+                          purchaseDate,
+                          depreciationYears: Number(depreciationYears) || 1,
+                        });
+                        setAssetEdits({ ...assetEdits, [a.id]: undefined });
+                      }}
+                    >
+                      Mettre à jour
+                    </Btn>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          <Input placeholder="Libellé du nouvel actif" value={assetForm.label} onChange={(e) => setAssetForm({ ...assetForm, label: e.target.value })} className="col-span-3" />
+          <Input type="number" placeholder="Coût" value={assetForm.cost} onChange={(e) => setAssetForm({ ...assetForm, cost: e.target.value })} />
+          <Input type="date" value={assetForm.purchaseDate} onChange={(e) => setAssetForm({ ...assetForm, purchaseDate: e.target.value })} />
+          <Input type="number" placeholder="Amorti sur (ans)" value={assetForm.depreciationYears} onChange={(e) => setAssetForm({ ...assetForm, depreciationYears: e.target.value })} />
+        </div>
+        <Btn kind="ghost" onClick={submitAsset} className="w-full">
+          <Plus size={16} /> Ajouter un actif
+        </Btn>
+      </Card>
+      {totals.assetsDetail.length > 0 && (
+        <PrintOrCopy
+          printKey="transport-actifs"
+          getText={() =>
+            `Actifs & amortissement — Transport\n\n` +
+            totals.assetsDetail.map((a) => `${a.label} — Coût ${fcfa(a.cost)} — Amorti ${fcfa(a.depreciation)} — Valeur nette ${fcfa(a.netValue)}`).join("\n")
+          }
+        />
+      )}
+      </div>
+
+      <div data-print-section="transport-prets">
+      <Card>
+        <SectionTitle icon={HandCoins}>Avances (ex : petits emprunts de ta compagne)</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Sort de la trésorerie Transport mais reste une créance — la valeur nette ne change pas tant que ce n'est pas remboursé.
+        </p>
+        <StatCard label="Avances en cours (à recevoir)" value={fcfa(totals.loansOutstanding)} tone="amber" />
+        <div className="grid grid-cols-2 gap-2 my-2">
+          <Input type="date" value={loanForm.date} onChange={(e) => setLoanForm({ ...loanForm, date: e.target.value })} />
+          <Input placeholder="Bénéficiaire" value={loanForm.beneficiary} onChange={(e) => setLoanForm({ ...loanForm, beneficiary: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="number" placeholder="Montant" value={loanForm.amount} onChange={(e) => setLoanForm({ ...loanForm, amount: e.target.value })} />
+          <Input placeholder="Note (optionnel)" value={loanForm.note} onChange={(e) => setLoanForm({ ...loanForm, note: e.target.value })} />
+        </div>
+        <Btn onClick={submitLoan} className="w-full mb-3">
+          <Plus size={16} /> Enregistrer l'avance
+        </Btn>
+        {t.loans.length === 0 && <p className="text-sm text-slate-400">Aucune avance en cours.</p>}
+        <ul className="divide-y divide-slate-100">
+          {t.loans.map((l) => {
+            const repaid = repaidAmount(l);
+            const due = l.amount - repaid;
+            const isOpen = expandedLoan === l.id;
+            const repayments = l.repayments || [];
+            return (
+              <li key={l.id} className="py-2 text-sm">
+                <div className="flex justify-between items-start gap-2">
+                  <span className="font-medium">{l.beneficiary}</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-slate-400">{new Date(l.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}</span>
+                    <ConfirmDeleteButton onConfirm={() => onDeleteLoan(l.id)} label={`Supprimer cette avance à ${l.beneficiary} (${fcfa(l.amount)}) ?`} />
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 flex justify-between mt-0.5 items-center">
+                  <button className="underline decoration-dotted" onClick={() => setExpandedLoan(isOpen ? null : l.id)} disabled={repayments.length === 0}>
+                    Avancé {fcfa(l.amount)} • Remboursé {fcfa(repaid)}
+                    {repayments.length > 0 ? (isOpen ? " ▲" : " ▼") : ""}
+                  </button>
+                  {due > 0 ? (
+                    <button className="text-teal-700 font-semibold" onClick={() => setRepayId(l.id)}>
+                      Solde {fcfa(due)} — encaisser
+                    </button>
+                  ) : (
+                    <span className="text-teal-700 font-semibold">Soldé</span>
+                  )}
+                </div>
+                {isOpen && repayments.length > 0 && (
+                  <div className="bg-slate-50 rounded-lg p-2 mt-2 space-y-1">
+                    <div className="text-xs text-slate-400 uppercase mb-1">Remboursements enregistrés</div>
+                    {repayments.map((r) => (
+                      <div key={r.id} className="flex items-center justify-between text-xs py-0.5">
+                        <span>{new Date(r.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })} — {fcfa(r.amount)}</span>
+                        <ConfirmDeleteButton onConfirm={() => onDeleteLoanRepayment(l.id, r.id)} label={`Supprimer ce remboursement de ${fcfa(r.amount)} ?`} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+      {t.loans.length > 0 && (
+        <PrintOrCopy
+          printKey="transport-prets"
+          getText={() =>
+            `Avances — Transport\nEn cours : ${fcfa(totals.loansOutstanding)}\n\n` +
+            t.loans.map((l) => `${l.beneficiary} — Avancé ${fcfa(l.amount)}, Remboursé ${fcfa(repaidAmount(l))}`).join("\n")
+          }
+        />
+      )}
+      </div>
+
+      {repayId && (
+        <Modal onClose={() => setRepayId(null)} title="Enregistrer un remboursement">
+          <Input type="number" placeholder="Montant remboursé" value={repayAmt} onChange={(e) => setRepayAmt(e.target.value)} className="mb-2" />
+          <Btn
+            className="w-full"
+            onClick={() => {
+              if (repayAmt) onRepayLoan(repayId, Number(repayAmt));
+              setRepayId(null);
+              setRepayAmt("");
+            }}
+          >
+            <Check size={16} /> Valider
+          </Btn>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function BalanceTab({
   data,
   totals,
@@ -4571,12 +5484,15 @@ function BalanceTab({
   onDeleteWithdrawal,
   onAddPersonalNote,
   onDeletePersonalNote,
+  onSetFamilyShare,
 }) {
   const [cash, setCash] = useState(data.meta.initialCash);
   const [capital, setCapital] = useState(data.meta.startingCapital || 0);
   const [liab, setLiab] = useState({ date: todayISO(), label: "", amount: "" });
   const [withdrawal, setWithdrawal] = useState({ date: todayISO(), amount: "", note: "" });
   const [note, setNote] = useState({ date: todayISO(), label: "", amount: "" });
+  const [pctEdit, setPctEdit] = useState(undefined);
+  const waterOwnerPct = data.meta.familyShare?.waterOwnerPct ?? 5;
 
   const submitLiab = () => {
     if (!liab.label || !liab.amount) return;
@@ -4608,36 +5524,168 @@ function BalanceTab({
         />
       </div>
 
+      {data.transport && (
+        <div data-print-section="tresorerie-famille">
+        <Card>
+          <SectionTitle icon={Wallet}>Trésorerie — Eau, Transport et globale</SectionTitle>
+          <p className="text-xs text-slate-500 mb-2">
+            Chaque activité garde sa propre trésorerie, jamais mélangée dans les calculs — la ligne "globale" n'est qu'une addition
+            pour la vue d'ensemble.
+          </p>
+          {(() => {
+            const tt = computeTransportTotals(data.transport, todayISO());
+            const globalTreasury = totals.treasury + tt.treasury;
+            return (
+              <div className="grid grid-cols-3 gap-2">
+                <StatCard label="Trésorerie Eau" value={fcfa(totals.treasury)} tone={totals.treasury >= 0 ? "teal" : "rose"} />
+                <StatCard label="Trésorerie Transport" value={fcfa(tt.treasury)} tone={tt.treasury >= 0 ? "teal" : "rose"} />
+                <StatCard label="Trésorerie Globale" value={fcfa(globalTreasury)} tone={globalTreasury >= 0 ? "teal" : "rose"} />
+              </div>
+            );
+          })()}
+        </Card>
+        <PrintOrCopy
+          printKey="tresorerie-famille"
+          getText={() => {
+            const tt = computeTransportTotals(data.transport, todayISO());
+            return (
+              `Trésorerie Famille — Multivers'Eau\n` +
+              `Trésorerie Eau : ${fcfa(totals.treasury)}\nTrésorerie Transport : ${fcfa(tt.treasury)}\n` +
+              `Trésorerie Globale : ${fcfa(totals.treasury + tt.treasury)}`
+            );
+          }}
+        />
+        </div>
+      )}
+
+      {data.transport && (
+        <div data-print-section="bilan-famille">
+        <Card>
+          <SectionTitle icon={Truck}>Vue famille consolidée — qui possède quoi</SectionTitle>
+          {(() => {
+            const tt = computeTransportTotals(data.transport, todayISO());
+            const familyNetWorth = totals.netWorth + tt.netWorth;
+            const transportOwnerPct =
+              (data.transport.meta.ownerContribution /
+                (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
+              100;
+            const essoweShare = (totals.netWorth * waterOwnerPct) / 100 + (tt.netWorth * transportOwnerPct) / 100;
+            const compagneShare = familyNetWorth - essoweShare;
+            return (
+              <>
+                <Row label="Valeur nette — Eau" value={fcfa(totals.netWorth)} />
+                <Row label="Valeur nette — Transport" value={fcfa(tt.netWorth)} />
+                <Row label="Valeur nette — Famille (total)" value={fcfa(familyNetWorth)} bold />
+                <div className="my-2 border-t border-slate-100" />
+                <Row
+                  label={`Ta part réelle (${waterOwnerPct}% Eau + ${transportOwnerPct.toFixed(1)}% Transport)`}
+                  value={fcfa(essoweShare)}
+                  bold
+                  tone="teal"
+                />
+                <Row
+                  label={`Part réelle de ta compagne (${100 - waterOwnerPct}% Eau + ${(100 - transportOwnerPct).toFixed(1)}% Transport)`}
+                  value={fcfa(compagneShare)}
+                  bold
+                />
+              </>
+            );
+          })()}
+        </Card>
+        <PrintOrCopy
+          printKey="bilan-famille"
+          getText={() => {
+            const tt = computeTransportTotals(data.transport, todayISO());
+            const familyNetWorth = totals.netWorth + tt.netWorth;
+            const transportOwnerPct =
+              (data.transport.meta.ownerContribution /
+                (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
+              100;
+            const essoweShare = (totals.netWorth * waterOwnerPct) / 100 + (tt.netWorth * transportOwnerPct) / 100;
+            const compagneShare = familyNetWorth - essoweShare;
+            return (
+              `Vue famille consolidée — Multivers'Eau\n` +
+              `Valeur nette Eau : ${fcfa(totals.netWorth)}\nValeur nette Transport : ${fcfa(tt.netWorth)}\n` +
+              `Valeur nette Famille : ${fcfa(familyNetWorth)}\n` +
+              `Ta part réelle : ${fcfa(essoweShare)}\nPart réelle de ta compagne : ${fcfa(compagneShare)}`
+            );
+          }}
+        />
+        </div>
+      )}
+
       <div data-print-section="objectif">
       <Card>
-        <SectionTitle icon={PiggyBank}>Objectif — dette envers l'investisseur</SectionTitle>
+        <SectionTitle icon={PiggyBank}>Répartition — part permanente (Eau)</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
-          Tant que la valeur nette du business n'a pas atteint ce montant, tu n'es pas encore en excédent réel — tout va d'abord au
-          remboursement de la dette (et aux besoins de la famille, pas de salaire de gérant pour l'instant).
+          Business familial : chacun garde un pourcentage fixe et permanent de la valeur — ce n'est pas un prêt à rembourser. Vue en
+          deux temps : d'abord le capital de départ, puis l'excédent net déjà généré, avant le total.
         </p>
-        <Row label="Montant à atteindre (prêt investisseur)" value={fcfa(totals.startingCapital)} />
-        <Row label="Valeur nette actuelle" value={fcfa(totals.netWorth)} />
-        <ProgressBar value={totals.netWorth} target={totals.startingCapital} />
-        <Row
-          label={totals.netResult >= 0 ? "Excédent réel (au-delà de la dette)" : "Reste à générer avant excédent"}
-          value={fcfa(Math.abs(totals.netResult))}
-          bold
-          tone={totals.netResult >= 0 ? "teal" : "rose"}
-        />
-        <div className="flex gap-2 mt-2">
-          <Input type="number" value={capital} onChange={(e) => setCapital(e.target.value)} placeholder="Montant du prêt (ex: 1000000)" />
+        {(() => {
+          const startingCapital = totals.startingCapital;
+          const netProfit = totals.netWorth - startingCapital;
+          const compagnePct = 100 - waterOwnerPct;
+          return (
+            <>
+              <div className="text-xs font-bold text-slate-600 mb-1">1. Capital de départ</div>
+              <Row label="Capital initial (Eau)" value={fcfa(startingCapital)} />
+              <Row label={`— dont ta compagne (${compagnePct}%)`} value={fcfa((startingCapital * compagnePct) / 100)} />
+              <Row label={`— dont toi (${waterOwnerPct}%)`} value={fcfa((startingCapital * waterOwnerPct) / 100)} />
+
+              <div className="text-xs font-bold text-slate-600 mt-3 mb-1">2. Bénéfice net / excédent généré depuis le départ</div>
+              <Row
+                label={netProfit >= 0 ? "Excédent net généré" : "Perte nette à ce jour"}
+                value={fcfa(Math.abs(netProfit))}
+                tone={netProfit >= 0 ? "teal" : "rose"}
+              />
+              <Row label={`— dont ta compagne (${compagnePct}%)`} value={fcfa((netProfit * compagnePct) / 100)} />
+              <Row label={`— dont toi (${waterOwnerPct}%)`} value={fcfa((netProfit * waterOwnerPct) / 100)} />
+
+              <div className="my-2 border-t border-slate-100" />
+              <div className="text-xs font-bold text-slate-600 mb-1">3. Total (capital + excédent)</div>
+              <Row label="Valeur nette actuelle (Eau)" value={fcfa(totals.netWorth)} bold />
+              <Row label={`Part totale de ta compagne (${compagnePct}%)`} value={fcfa((totals.netWorth * compagnePct) / 100)} />
+              <Row label={`Ta part totale (${waterOwnerPct}%)`} value={fcfa((totals.netWorth * waterOwnerPct) / 100)} bold tone="teal" />
+            </>
+          );
+        })()}
+        <div className="flex gap-2 mt-2 items-end">
+          <div className="flex-1">
+            <label className="text-xs text-slate-400">Capital initial (Eau)</label>
+            <Input type="number" value={capital} onChange={(e) => setCapital(e.target.value)} />
+          </div>
           <Btn onClick={() => onSetStartingCapital(Number(capital) || 0)}>
+            <Check size={16} /> Mettre à jour
+          </Btn>
+        </div>
+        <div className="flex gap-2 mt-2 items-end">
+          <div className="flex-1">
+            <label className="text-xs text-slate-400">Ton pourcentage (le sien devient automatiquement le reste)</label>
+            <Input type="number" value={pctEdit ?? waterOwnerPct} onChange={(e) => setPctEdit(e.target.value)} />
+          </div>
+          <Btn
+            onClick={() => {
+              onSetFamilyShare(pctEdit ?? waterOwnerPct);
+              setPctEdit(undefined);
+            }}
+          >
             <Check size={16} /> Mettre à jour
           </Btn>
         </div>
       </Card>
       <PrintOrCopy
         printKey="objectif"
-        getText={() =>
-          `Objectif — dette investisseur — Multivers'Eau\n` +
-          `Montant à atteindre : ${fcfa(totals.startingCapital)}\nValeur nette actuelle : ${fcfa(totals.netWorth)}\n` +
-          `${totals.netResult >= 0 ? "Excédent réel" : "Reste à générer"} : ${fcfa(Math.abs(totals.netResult))}`
-        }
+        getText={() => {
+          const startingCapital = totals.startingCapital;
+          const netProfit = totals.netWorth - startingCapital;
+          const compagnePct = 100 - waterOwnerPct;
+          return (
+            `Répartition Eau — Multivers'Eau\n\n` +
+            `1. Capital de départ : ${fcfa(startingCapital)} (compagne ${compagnePct}% = ${fcfa((startingCapital * compagnePct) / 100)}, toi ${waterOwnerPct}% = ${fcfa((startingCapital * waterOwnerPct) / 100)})\n` +
+            `2. Excédent net généré : ${fcfa(netProfit)} (compagne = ${fcfa((netProfit * compagnePct) / 100)}, toi = ${fcfa((netProfit * waterOwnerPct) / 100)})\n` +
+            `3. Valeur nette totale : ${fcfa(totals.netWorth)}\nPart totale compagne : ${fcfa((totals.netWorth * compagnePct) / 100)}\nTa part totale : ${fcfa((totals.netWorth * waterOwnerPct) / 100)}`
+          );
+        }}
       />
       </div>
 
@@ -4978,7 +6026,7 @@ function SettingsTab({ data, onUpdate, onAddProduct, onRestore, onExported, onSe
           Tes données sont enregistrées automatiquement à chaque action. Par précaution, tu peux aussi exporter un fichier de
           sauvegarde à tout moment, et le réimporter plus tard si besoin (par ex. en cas de problème technique).
         </p>
-        <p className={`text-xs mb-2 font-medium ${daysSinceExport === null || daysSinceExport >= 1 ? "text-amber-600" : "text-teal-700"}`}>
+        <p className={`text-xs mb-2 font-medium ${daysSinceExport === null || daysSinceExport > 3 ? "text-amber-600" : "text-teal-700"}`}>
           {lastExport
             ? `Dernière sauvegarde exportée : ${lastExport.toLocaleDateString("fr-FR", { timeZone: "UTC" })} (il y a ${daysSinceExport} j)`
             : "Aucune sauvegarde exportée pour l'instant — pense à en faire une !"}
