@@ -2462,7 +2462,14 @@ function computeFamilyMonthlyProfit(data, waterTotals) {
     transportProfit = ownerShare - expensesOwnerCost - transportReserve;
   }
 
-  const familyProfit = waterProfit + transportProfit;
+  // Investissement passif (ex : revente de vêtements Togo-Ghana) : 100% à
+  // toi, jamais partagé avec ta compagne — c'est un deal séparé, sans lien
+  // avec elle ni avec l'eau ou le transport.
+  const investmentProfit = data.investment
+    ? data.investment.entries.filter((e) => inMonth(e.date)).reduce((s, e) => s + e.amountReceived, 0)
+    : 0;
+
+  const familyProfit = waterProfit + transportProfit + investmentProfit;
 
   // Répartition réelle du bénéfice du mois entre les deux — chaque activité
   // applique son propre pourcentage permanent, pas un partage global unique.
@@ -2472,13 +2479,14 @@ function computeFamilyMonthlyProfit(data, waterTotals) {
         (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
       100
     : 100;
-  const essoweProfit = (waterProfit * waterOwnerPct) / 100 + (transportProfit * transportOwnerPct) / 100;
+  const essoweProfit = (waterProfit * waterOwnerPct) / 100 + (transportProfit * transportOwnerPct) / 100 + investmentProfit;
   const compagneProfit = familyProfit - essoweProfit;
 
   return {
     waterProfit,
     transportProfit,
     transportReserve,
+    investmentProfit,
     familyProfit,
     waterOwnerPct,
     transportOwnerPct,
@@ -2965,16 +2973,18 @@ function Dashboard({ data, totals, productsById }) {
       <Card>
         <SectionTitle icon={PiggyBank}>Bénéfice Famille du mois</SectionTitle>
         <p className="text-xs text-slate-500 mb-2">
-          Combine Eau et Transport{data.transport ? "" : " (Transport pas encore configuré)"} — net des dépenses du mois et, pour le
-          Transport, de sa réserve de renouvellement (amortissement). Réparti selon la part permanente de chacun.
+          Combine Eau, Transport{data.transport ? "" : " (pas encore configuré)"} et Investissement
+          {data.investment ? "" : " (pas encore configuré)"} — net des dépenses du mois et, pour le Transport, de sa réserve de
+          renouvellement. Réparti selon la part permanente de chacun (l'investissement est 100% à toi).
         </p>
         <Row label="Bénéfice Eau (net des dépenses du mois)" value={fcfa(familyMonthly.waterProfit)} />
         {data.transport && <Row label="Bénéfice Transport (net de la réserve)" value={fcfa(familyMonthly.transportProfit)} />}
         {data.transport && <Row label="— dont réserve de renouvellement mise de côté" value={fcfa(familyMonthly.transportReserve)} />}
+        {data.investment && <Row label="Reçu de l'Investissement (100% à toi)" value={fcfa(familyMonthly.investmentProfit)} />}
         <Row label="Bénéfice Famille total du mois" value={fcfa(familyMonthly.familyProfit)} bold />
         <div className="my-2 border-t border-slate-100" />
         <Row
-          label={`Ta part réelle (${familyMonthly.waterOwnerPct}% Eau${data.transport ? ` + ${familyMonthly.transportOwnerPct.toFixed(1)}% Transport` : ""})`}
+          label={`Ta part réelle (${familyMonthly.waterOwnerPct}% Eau${data.transport ? ` + ${familyMonthly.transportOwnerPct.toFixed(1)}% Transport` : ""}${data.investment ? " + 100% Investissement" : ""})`}
           value={fcfa(familyMonthly.essoweProfit)}
           bold
           tone="teal"
@@ -2987,6 +2997,7 @@ function Dashboard({ data, totals, productsById }) {
           `Bénéfice Famille du mois — Multivers'Eau\n` +
           `Bénéfice Eau : ${fcfa(familyMonthly.waterProfit)}\n` +
           (data.transport ? `Bénéfice Transport : ${fcfa(familyMonthly.transportProfit)} (réserve : ${fcfa(familyMonthly.transportReserve)})\n` : "") +
+          (data.investment ? `Reçu Investissement (100% toi) : ${fcfa(familyMonthly.investmentProfit)}\n` : "") +
           `Bénéfice Famille total : ${fcfa(familyMonthly.familyProfit)}\n` +
           `Ta part réelle : ${fcfa(familyMonthly.essoweProfit)}\nPart réelle compagne : ${fcfa(familyMonthly.compagneProfit)}`
         }
@@ -5831,33 +5842,38 @@ function BalanceTab({
         </div>
       )}
 
-      {data.transport && (
+      {(data.transport || data.investment) && (
         <div data-print-section="bilan-famille">
         <Card>
-          <SectionTitle icon={Truck}>Vue famille consolidée — qui possède quoi</SectionTitle>
+          <SectionTitle icon={Truck}>Patrimoine Famille total — qui possède quoi</SectionTitle>
           {(() => {
-            const tt = computeTransportTotals(data.transport, todayISO());
-            const familyNetWorth = totals.netWorth + tt.netWorth;
-            const transportOwnerPct =
-              (data.transport.meta.ownerContribution /
-                (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
-              100;
-            const essoweShare = (totals.netWorth * waterOwnerPct) / 100 + (tt.netWorth * transportOwnerPct) / 100;
+            const tt = data.transport ? computeTransportTotals(data.transport, todayISO()) : null;
+            const iv = data.investment ? computeInvestmentTotals(data.investment) : null;
+            const transportNetWorth = tt ? tt.netWorth : 0;
+            const investmentValue = iv ? iv.totalReceived : 0; // 100% à toi, jamais partagé
+            const familyNetWorth = totals.netWorth + transportNetWorth + investmentValue;
+            const transportOwnerPct = data.transport
+              ? (data.transport.meta.ownerContribution /
+                  (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
+                100
+              : 0;
+            const essoweShare = (totals.netWorth * waterOwnerPct) / 100 + (transportNetWorth * transportOwnerPct) / 100 + investmentValue;
             const compagneShare = familyNetWorth - essoweShare;
             return (
               <>
                 <Row label="Valeur nette — Eau" value={fcfa(totals.netWorth)} />
-                <Row label="Valeur nette — Transport" value={fcfa(tt.netWorth)} />
-                <Row label="Valeur nette — Famille (total)" value={fcfa(familyNetWorth)} bold />
+                {data.transport && <Row label="Valeur nette — Transport" value={fcfa(transportNetWorth)} />}
+                {data.investment && <Row label="Cumul reçu — Investissement (100% à toi)" value={fcfa(investmentValue)} />}
+                <Row label="Patrimoine Famille (total)" value={fcfa(familyNetWorth)} bold />
                 <div className="my-2 border-t border-slate-100" />
                 <Row
-                  label={`Ta part réelle (${waterOwnerPct}% Eau + ${transportOwnerPct.toFixed(1)}% Transport)`}
+                  label={`Ta part réelle (${waterOwnerPct}% Eau${data.transport ? ` + ${transportOwnerPct.toFixed(1)}% Transport` : ""}${data.investment ? " + 100% Investissement" : ""})`}
                   value={fcfa(essoweShare)}
                   bold
                   tone="teal"
                 />
                 <Row
-                  label={`Part réelle de ta compagne (${100 - waterOwnerPct}% Eau + ${(100 - transportOwnerPct).toFixed(1)}% Transport)`}
+                  label={`Part réelle de ta compagne (${100 - waterOwnerPct}% Eau${data.transport ? ` + ${(100 - transportOwnerPct).toFixed(1)}% Transport` : ""})`}
                   value={fcfa(compagneShare)}
                   bold
                 />
@@ -5868,18 +5884,24 @@ function BalanceTab({
         <PrintOrCopy
           printKey="bilan-famille"
           getText={() => {
-            const tt = computeTransportTotals(data.transport, todayISO());
-            const familyNetWorth = totals.netWorth + tt.netWorth;
-            const transportOwnerPct =
-              (data.transport.meta.ownerContribution /
-                (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
-              100;
-            const essoweShare = (totals.netWorth * waterOwnerPct) / 100 + (tt.netWorth * transportOwnerPct) / 100;
+            const tt = data.transport ? computeTransportTotals(data.transport, todayISO()) : null;
+            const iv = data.investment ? computeInvestmentTotals(data.investment) : null;
+            const transportNetWorth = tt ? tt.netWorth : 0;
+            const investmentValue = iv ? iv.totalReceived : 0;
+            const familyNetWorth = totals.netWorth + transportNetWorth + investmentValue;
+            const transportOwnerPct = data.transport
+              ? (data.transport.meta.ownerContribution /
+                  (data.transport.meta.ownerContribution + data.transport.meta.investorContribution)) *
+                100
+              : 0;
+            const essoweShare = (totals.netWorth * waterOwnerPct) / 100 + (transportNetWorth * transportOwnerPct) / 100 + investmentValue;
             const compagneShare = familyNetWorth - essoweShare;
             return (
-              `Vue famille consolidée — Multivers'Eau\n` +
-              `Valeur nette Eau : ${fcfa(totals.netWorth)}\nValeur nette Transport : ${fcfa(tt.netWorth)}\n` +
-              `Valeur nette Famille : ${fcfa(familyNetWorth)}\n` +
+              `Patrimoine Famille total — Multivers'Eau\n` +
+              `Valeur nette Eau : ${fcfa(totals.netWorth)}\n` +
+              (data.transport ? `Valeur nette Transport : ${fcfa(transportNetWorth)}\n` : "") +
+              (data.investment ? `Cumul reçu Investissement (100% toi) : ${fcfa(investmentValue)}\n` : "") +
+              `Patrimoine Famille total : ${fcfa(familyNetWorth)}\n` +
               `Ta part réelle : ${fcfa(essoweShare)}\nPart réelle de ta compagne : ${fcfa(compagneShare)}`
             );
           }}
