@@ -1070,6 +1070,7 @@ function defaultData() {
     recyclingSales: [],
     depletedLots: [],
     transport: null, // activité tricycle — configurée à la demande via l'onglet dédié
+    investment: null, // investissement passif (ex : couture d'une amie) — configuré à la demande
   };
 }
 
@@ -1084,6 +1085,7 @@ function migrate(d) {
   if (!d.depletedLots) d = { ...d, depletedLots: [] };
   if (d.transport === undefined) d = { ...d, transport: null };
   if (d.transport && !d.transport.loans) d = { ...d, transport: { ...d.transport, loans: [] } };
+  if (d.investment === undefined) d = { ...d, investment: null };
   if (!d.meta.familyShare) d = { ...d, meta: { ...d.meta, familyShare: { waterOwnerPct: 5 } } };
   if (d.sales && d.sales.some((s) => !s.payments)) {
     d = {
@@ -2068,6 +2070,47 @@ export default function App({ uid: currentUid, onSignOut }) {
     showToast("Remboursement annulé");
   };
 
+  /* ------------------------ Investissement passif ------------------------ */
+  // Ex : part dans le business de couture d'une amie. Capital de départ
+  // jamais récupéré — seule la part reçue chaque mois est suivie.
+
+  const setupInvestment = (config) => {
+    persist({
+      ...data,
+      investment: {
+        meta: {
+          label: config.label,
+          initialAmount: config.initialAmount,
+          ownerPct: config.ownerPct,
+          startDate: config.startDate,
+        },
+        entries: [],
+      },
+    });
+    showToast("Investissement configuré");
+  };
+
+  const updateInvestmentMeta = (patch) => {
+    persist({ ...data, investment: { ...data.investment, meta: { ...data.investment.meta, ...patch } } });
+    showToast("Investissement mis à jour");
+  };
+
+  const addInvestmentEntry = (entry) => {
+    persist({
+      ...data,
+      investment: { ...data.investment, entries: [{ id: uid(), ...entry }, ...data.investment.entries] },
+    });
+    showToast("Bénéfice mensuel enregistré");
+  };
+
+  const deleteInvestmentEntry = (id) => {
+    persist({
+      ...data,
+      investment: { ...data.investment, entries: data.investment.entries.filter((e) => e.id !== id) },
+    });
+    showToast("Entrée supprimée");
+  };
+
 
   // Nouvelle marque ou nouveau format ajouté manuellement — démarre avec un
   // stock vide (à réapprovisionner ensuite normalement).
@@ -2126,6 +2169,7 @@ export default function App({ uid: currentUid, onSignOut }) {
     { key: "expenses", label: "Dépenses", icon: Receipt },
     { key: "recycling", label: "Recyclage", icon: Recycle },
     { key: "transport", label: "Transport", icon: Truck },
+    { key: "investment", label: "Investissement", icon: TrendingUp },
     { key: "balance", label: "Bilan", icon: PiggyBank },
     { key: "settings", label: "Produits", icon: Settings },
   ];
@@ -2236,6 +2280,15 @@ export default function App({ uid: currentUid, onSignOut }) {
             onDeleteLoanRepayment={deleteTransportLoanRepayment}
           />
         )}
+        {tab === "investment" && (
+          <InvestmentTab
+            data={data}
+            onSetup={setupInvestment}
+            onUpdateMeta={updateInvestmentMeta}
+            onAddEntry={addInvestmentEntry}
+            onDeleteEntry={deleteInvestmentEntry}
+          />
+        )}
         {tab === "balance" && (
           <BalanceTab
             data={data}
@@ -2308,6 +2361,24 @@ function assetDepreciation(asset, asOfDate) {
 // chauffeur (le carburant reste entièrement à sa charge, sur sa moitié) ;
 // l'entretien est partagé 50/50 ; toute autre dépense reste à 100% côté
 // propriétaire (assurance, taxes...).
+// Investissement passif (ex : part dans le business d'une amie) : le
+// capital de départ n'est jamais récupéré (fonds de base permanent) — seule
+// la part reçue chaque mois compte. Le montant qu'elle remet CHAQUE MOIS est
+// déjà les X% convenus (ex : 20 000 F reçus = déjà ses 70%) — on ne
+// multiplie donc plus rien, on additionne directement ce qui est reçu. Le
+// pourcentage sert juste, à titre informatif, à déduire le bénéfice total
+// qu'elle a réellement réalisé de son côté. Une fois le cumul reçu égal au
+// capital de départ, la "rentabilité" atteint 100% ; au-delà, tout est du
+// bénéfice net.
+function computeInvestmentTotals(investment) {
+  if (!investment) return null;
+  const totalReceived = investment.entries.reduce((s, e) => s + e.amountReceived, 0);
+  const remainingToBreakeven = Math.max(0, investment.meta.initialAmount - totalReceived);
+  const netProfit = Math.max(0, totalReceived - investment.meta.initialAmount);
+  const rentabilityPct = investment.meta.initialAmount > 0 ? Math.min(100, (totalReceived / investment.meta.initialAmount) * 100) : 100;
+  return { totalReceived, remainingToBreakeven, netProfit, rentabilityPct };
+}
+
 function computeTransportTotals(transport, asOfDate) {
   if (!transport) return null;
   const today = asOfDate || todayISO();
@@ -5469,6 +5540,208 @@ function TransportDashboard({ data, onAddTrip, onDeleteTrip, onAddExpense, onDel
           </Btn>
         </Modal>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------ Investissement ----------------------------- */
+// Investissement passif dans le business d'un tiers (ex : couture d'une
+// amie) : capital de départ jamais récupéré, seule la part reçue chaque
+// mois est suivie. Complètement indépendant de l'eau et du transport.
+
+function InvestmentTab({ data, onSetup, onUpdateMeta, onAddEntry, onDeleteEntry }) {
+  const [setupForm, setSetupForm] = useState({
+    label: "Investissement — Revente de vêtements Togo-Ghana (amie)",
+    initialAmount: "80000",
+    ownerPct: "70",
+    startDate: todayISO(),
+  });
+
+  const submitSetup = () => {
+    if (!setupForm.label || !Number(setupForm.initialAmount)) return;
+    onSetup({
+      label: setupForm.label,
+      initialAmount: Number(setupForm.initialAmount) || 0,
+      ownerPct: Number(setupForm.ownerPct) || 0,
+      startDate: setupForm.startDate,
+    });
+  };
+
+  if (!data.investment) {
+    return (
+      <div className="space-y-3">
+        <Card>
+          <SectionTitle icon={TrendingUp}>Configurer un investissement passif</SectionTitle>
+          <p className="text-xs text-slate-500 mb-2">
+            Pour un capital que tu ne récupères pas (il reste un fonds de base permanent) — seule la part des bénéfices mensuels
+            que tu reçois est suivie. Modifiable à tout moment ensuite.
+          </p>
+          <div className="mb-2">
+            <label className="text-xs text-slate-400">Nom de l'investissement</label>
+            <Input value={setupForm.label} onChange={(e) => setSetupForm({ ...setupForm, label: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <label className="text-xs text-slate-400">Capital de départ (non récupérable)</label>
+              <Input type="number" value={setupForm.initialAmount} onChange={(e) => setSetupForm({ ...setupForm, initialAmount: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Ta part sur les bénéfices mensuels (%)</label>
+              <Input type="number" value={setupForm.ownerPct} onChange={(e) => setSetupForm({ ...setupForm, ownerPct: e.target.value })} />
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className="text-xs text-slate-400">Date de départ</label>
+            <Input type="date" value={setupForm.startDate} onChange={(e) => setSetupForm({ ...setupForm, startDate: e.target.value })} />
+          </div>
+          <Btn onClick={submitSetup} className="w-full">
+            <Check size={16} /> Démarrer le suivi
+          </Btn>
+        </Card>
+      </div>
+    );
+  }
+
+  return <InvestmentDashboard data={data} onUpdateMeta={onUpdateMeta} onAddEntry={onAddEntry} onDeleteEntry={onDeleteEntry} />;
+}
+
+function InvestmentDashboard({ data, onUpdateMeta, onAddEntry, onDeleteEntry }) {
+  const inv = data.investment;
+  const totals = useMemo(() => computeInvestmentTotals(inv), [inv]);
+  const [entryForm, setEntryForm] = useState({ date: todayISO(), amountReceived: "", note: "" });
+  const [metaEdit, setMetaEdit] = useState({ label: undefined, initialAmount: undefined, ownerPct: undefined });
+
+  const label = metaEdit.label ?? inv.meta.label;
+  const initialAmount = metaEdit.initialAmount ?? inv.meta.initialAmount;
+  const ownerPct = metaEdit.ownerPct ?? inv.meta.ownerPct;
+
+  const submitMeta = () => {
+    onUpdateMeta({
+      label,
+      initialAmount: Number(initialAmount) || 0,
+      ownerPct: Number(ownerPct) || 0,
+    });
+    setMetaEdit({ label: undefined, initialAmount: undefined, ownerPct: undefined });
+  };
+
+  const submitEntry = () => {
+    const amount = Number(entryForm.amountReceived);
+    if (!amount) return;
+    onAddEntry({ date: entryForm.date, amountReceived: amount, note: entryForm.note });
+    setEntryForm({ date: entryForm.date, amountReceived: "", note: "" });
+  };
+
+  const impliedTotalProfit = ownerPct > 0 ? ((Number(entryForm.amountReceived) || 0) / ownerPct) * 100 : 0;
+
+  return (
+    <div className="space-y-3">
+      <PrintWholeTab label="Imprimer tout l'onglet Investissement" />
+
+      <div data-print-section="investment-resume">
+      <Card>
+        <SectionTitle icon={TrendingUp}>{inv.meta.label}</SectionTitle>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <StatCard label="Capital de départ (non récupérable)" value={fcfa(inv.meta.initialAmount)} />
+          <StatCard label="Total reçu à ce jour" value={fcfa(totals.totalReceived)} tone="teal" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {totals.rentabilityPct < 100 ? (
+            <>
+              <StatCard label="Reste avant rentabilité 100%" value={fcfa(totals.remainingToBreakeven)} tone="amber" />
+              <StatCard label="Rentabilité" value={`${totals.rentabilityPct.toFixed(1)} %`} />
+            </>
+          ) : (
+            <>
+              <StatCard label="Rentabilité" value="100 % atteinte" tone="teal" />
+              <StatCard label="Bénéfice net (au-delà du capital)" value={fcfa(totals.netProfit)} tone="teal" />
+            </>
+          )}
+        </div>
+      </Card>
+      <PrintOrCopy
+        printKey="investment-resume"
+        getText={() =>
+          `${inv.meta.label} — Multivers'Eau\nCapital de départ : ${fcfa(inv.meta.initialAmount)}\n` +
+          `Total reçu : ${fcfa(totals.totalReceived)}\nRentabilité : ${totals.rentabilityPct.toFixed(1)}%\n` +
+          (totals.rentabilityPct >= 100 ? `Bénéfice net : ${fcfa(totals.netProfit)}` : `Reste avant 100% : ${fcfa(totals.remainingToBreakeven)}`)
+        }
+      />
+      </div>
+
+      <Card>
+        <SectionTitle icon={Settings}>Capital — modifiable à tout moment</SectionTitle>
+        <div className="mb-2">
+          <label className="text-xs text-slate-400">Nom</label>
+          <Input value={label} onChange={(e) => setMetaEdit({ ...metaEdit, label: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div>
+            <label className="text-xs text-slate-400">Capital de départ</label>
+            <Input type="number" value={initialAmount} onChange={(e) => setMetaEdit({ ...metaEdit, initialAmount: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400">Ta part convenue (%) — informatif</label>
+            <Input type="number" value={ownerPct} onChange={(e) => setMetaEdit({ ...metaEdit, ownerPct: e.target.value })} />
+          </div>
+        </div>
+        <Btn onClick={submitMeta} className="w-full">
+          <Check size={16} /> Mettre à jour
+        </Btn>
+      </Card>
+
+      <Card>
+        <SectionTitle icon={Receipt}>Nouveau montant reçu ce mois</SectionTitle>
+        <p className="text-xs text-slate-500 mb-2">
+          Tape directement ce qu'elle t'a remis — ce montant est déjà tes {ownerPct}%, l'app ne recalcule rien dessus.
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Input type="date" value={entryForm.date} onChange={(e) => setEntryForm({ ...entryForm, date: e.target.value })} />
+          <Input
+            type="number"
+            placeholder="Montant reçu"
+            value={entryForm.amountReceived}
+            onChange={(e) => setEntryForm({ ...entryForm, amountReceived: e.target.value })}
+          />
+        </div>
+        <Input placeholder="Note (optionnel)" value={entryForm.note} onChange={(e) => setEntryForm({ ...entryForm, note: e.target.value })} className="mb-2" />
+        {entryForm.amountReceived && ownerPct > 0 && (
+          <p className="text-xs text-slate-500 mb-2">
+            Ça correspond à un bénéfice total réalisé d'environ {fcfa(impliedTotalProfit)} de son côté (à titre indicatif).
+          </p>
+        )}
+        <Btn onClick={submitEntry} className="w-full">
+          <Plus size={16} /> Enregistrer
+        </Btn>
+      </Card>
+
+      <div data-print-section="investment-historique">
+      <Card>
+        <SectionTitle icon={Receipt}>Historique des montants reçus</SectionTitle>
+        {inv.entries.length === 0 && <p className="text-sm text-slate-400">Aucune entrée enregistrée.</p>}
+        <ul className="divide-y divide-slate-100">
+          {inv.entries.map((e) => (
+            <li key={e.id} className="py-2 text-sm">
+              <div className="flex justify-between items-start gap-2">
+                <span className="font-medium">
+                  {new Date(e.date).toLocaleDateString("fr-FR", { timeZone: "UTC" })}
+                  {e.note ? <span className="text-slate-400 font-normal"> — {e.note}</span> : null}
+                </span>
+                <ConfirmDeleteButton onConfirm={() => onDeleteEntry(e.id)} label={`Supprimer cette entrée du ${e.date} ?`} />
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Reçu : <b className="text-teal-700">{fcfa(e.amountReceived)}</b>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      {inv.entries.length > 0 && (
+        <PrintOrCopy
+          printKey="investment-historique"
+          getText={() => `Historique — ${inv.meta.label}\n\n` + inv.entries.map((e) => `${e.date} — Reçu ${fcfa(e.amountReceived)}`).join("\n")}
+        />
+      )}
+      </div>
     </div>
   );
 }
